@@ -3,13 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!--
-    Hugging Face's CDN blocks requests whose Referer header is a *.workers.dev
-    domain (likely anti-scraping protection on that shared/anonymous subdomain
-    space) — confirmed by testing with and without the header. WebLLM and
-    Transformers.js fetch model weights from huggingface.co, so suppress the
-    Referer entirely for all outgoing requests from this page.
-  -->
   <meta name="referrer" content="no-referrer" />
   <title>Client-side LLM Chat</title>
   <link rel="stylesheet" href="style.css" />
@@ -54,6 +47,19 @@
         <label id="image-label" for="image-input" class="upload-btn">Choose an image…</label>
       </div>
     </form>
+  </div>
+
+  <div id="load-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h2>Downloading model</h2>
+      <p id="modal-model-name" class="modal-model-name"></p>
+      <div class="progress-track">
+        <div id="modal-progress-fill" class="progress-fill"></div>
+      </div>
+      <p id="modal-status" class="modal-status"></p>
+      <p class="modal-note">Model weights are downloaded once, then cached in your browser for next time. Depending on the model and your connection, this can take a while — don't close the tab.</p>
+      <button id="modal-close-btn" class="modal-close-btn hidden" type="button">Close</button>
+    </div>
   </div>
 
   <script type="module" src="app.js"></script>

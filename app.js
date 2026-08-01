@@ -35,6 +35,11 @@ const input = document.getElementById("chat-input");
 const sendBtn = document.getElementById("send-btn");
 const imageInput = document.getElementById("image-input");
 const imageLabel = document.getElementById("image-label");
+const loadModal = document.getElementById("load-modal");
+const modalModelName = document.getElementById("modal-model-name");
+const modalProgressFill = document.getElementById("modal-progress-fill");
+const modalStatus = document.getElementById("modal-status");
+const modalCloseBtn = document.getElementById("modal-close-btn");
 
 /** @type {{role: "user"|"assistant", content: string}[]} */
 let history = [];
@@ -49,6 +54,37 @@ function setStatus(text, isError = false) {
   statusEl.textContent = text;
   statusEl.classList.toggle("error", isError);
 }
+
+// Downloading a model is a real commitment — tens to hundreds of MB over the
+// network — so make it obvious with a blocking full-page modal and progress
+// bar rather than a quiet status line, and let the library-reported progress
+// (0-100, or unknown/indeterminate) drive the bar.
+function showLoadModal(modelId) {
+  modalModelName.textContent = modelId;
+  modalProgressFill.classList.add("indeterminate");
+  modalProgressFill.style.width = "0%";
+  modalStatus.textContent = "Starting…";
+  modalStatus.classList.remove("error");
+  modalCloseBtn.classList.add("hidden");
+  loadModal.classList.remove("hidden");
+}
+
+function hideLoadModal() {
+  loadModal.classList.add("hidden");
+}
+
+function setLoadProgress(text, percent = null) {
+  setStatus(text);
+  modalStatus.textContent = text;
+  if (percent === null) {
+    modalProgressFill.classList.add("indeterminate");
+  } else {
+    modalProgressFill.classList.remove("indeterminate");
+    modalProgressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  }
+}
+
+modalCloseBtn.addEventListener("click", hideLoadModal);
 
 function setChatEnabled(enabled) {
   input.disabled = !enabled;
@@ -136,14 +172,14 @@ async function withRetries(fn, { maxAttempts = 3 } = {}) {
             "usually a transient Hugging Face CDN hiccup, try Load model again)"
         );
       }
-      setStatus(`Download hiccup, retrying (${attempt}/${maxAttempts})...`);
+      setLoadProgress(`Download hiccup, retrying (${attempt}/${maxAttempts})...`);
       await new Promise((r) => setTimeout(r, 1000 * attempt));
     }
   }
 }
 
 async function loadWebLLM() {
-  setStatus("Loading WebLLM engine...");
+  setLoadProgress("Loading WebLLM engine...");
   const { CreateMLCEngine } = await import(
     "https://esm.run/@mlc-ai/web-llm"
   );
@@ -158,15 +194,27 @@ async function loadWebLLM() {
   webllmEngine = await withRetries(() =>
     CreateMLCEngine(modelId, {
       initProgressCallback: (report) => {
-        setStatus(report.text || "Loading model...");
+        setLoadProgress(
+          report.text || "Loading model...",
+          report.progress != null ? report.progress * 100 : null
+        );
       },
     })
   );
-  setStatus(`Loaded ${modelId}. Ready to chat.`);
+  setLoadProgress(`Loaded ${modelId}. Ready to chat.`, 100);
+}
+
+function transformersProgressCallback(progress) {
+  if (progress.status === "progress") {
+    const pct = Math.round(progress.progress ?? 0);
+    setLoadProgress(`Downloading ${progress.file} (${pct}%)...`, pct);
+  } else {
+    setLoadProgress(`${progress.status}...`);
+  }
 }
 
 async function loadTransformers() {
-  setStatus("Loading Transformers.js...");
+  setLoadProgress("Loading Transformers.js...");
   const { pipeline } = await import(
     "https://esm.run/@huggingface/transformers"
   );
@@ -176,21 +224,14 @@ async function loadTransformers() {
   transformersPipeline = await withRetries(() =>
     pipeline("text-generation", modelId, {
       ...(dtype ? { dtype } : {}),
-      progress_callback: (progress) => {
-        if (progress.status === "progress") {
-          const pct = Math.round(progress.progress ?? 0);
-          setStatus(`Downloading ${progress.file} (${pct}%)...`);
-        } else {
-          setStatus(`${progress.status}...`);
-        }
-      },
+      progress_callback: transformersProgressCallback,
     })
   );
-  setStatus(`Loaded ${modelId}. Ready to chat.`);
+  setLoadProgress(`Loaded ${modelId}. Ready to chat.`, 100);
 }
 
 async function loadCaptioner() {
-  setStatus("Loading image captioning model...");
+  setLoadProgress("Loading image captioning model...");
   const { pipeline } = await import(
     "https://esm.run/@huggingface/transformers"
   );
@@ -200,17 +241,10 @@ async function loadCaptioner() {
   captionerPipeline = await withRetries(() =>
     pipeline("image-to-text", modelId, {
       ...(dtype ? { dtype } : {}),
-      progress_callback: (progress) => {
-        if (progress.status === "progress") {
-          const pct = Math.round(progress.progress ?? 0);
-          setStatus(`Downloading ${progress.file} (${pct}%)...`);
-        } else {
-          setStatus(`${progress.status}...`);
-        }
-      },
+      progress_callback: transformersProgressCallback,
     })
   );
-  setStatus(`Loaded ${modelId}. Upload an image to caption it.`);
+  setLoadProgress(`Loaded ${modelId}. Upload an image to caption it.`, 100);
 }
 
 async function loadChromeAI() {
@@ -231,15 +265,15 @@ async function loadChromeAI() {
     );
   }
 
-  setStatus("Preparing Chrome built-in model...");
+  setLoadProgress("Preparing Chrome built-in model...");
   chromeSession = await LanguageModel.create({
     monitor(m) {
       m.addEventListener("downloadprogress", (e) => {
-        setStatus(`Downloading Gemini Nano: ${Math.round(e.loaded * 100)}%`);
+        setLoadProgress(`Downloading Gemini Nano: ${Math.round(e.loaded * 100)}%`, e.loaded * 100);
       });
     },
   });
-  setStatus("Gemini Nano ready. Ready to chat.");
+  setLoadProgress("Gemini Nano ready. Ready to chat.", 100);
 }
 
 const loaders = {
@@ -253,12 +287,19 @@ loadBtn.addEventListener("click", async () => {
   loadBtn.disabled = true;
   setChatEnabled(false);
   resetProviderState();
+  showLoadModal(getSelectedModelConfig()?.label ?? providerSelect.value);
   try {
     await loaders[providerSelect.value]();
     setChatEnabled(true);
+    setTimeout(hideLoadModal, 500);
   } catch (err) {
     console.error(err);
-    setStatus(err.message ?? String(err), true);
+    const message = err.message ?? String(err);
+    setStatus(message, true);
+    modalStatus.textContent = message;
+    modalStatus.classList.add("error");
+    modalProgressFill.classList.remove("indeterminate");
+    modalCloseBtn.classList.remove("hidden");
   } finally {
     loadBtn.disabled = false;
   }
