@@ -71,12 +71,33 @@ async function loadWebLLM() {
   }
 
   const modelId = modelSelect.value;
-  webllmEngine = await CreateMLCEngine(modelId, {
-    initProgressCallback: (report) => {
-      setStatus(report.text || "Loading model...");
-    },
-  });
-  setStatus(`Loaded ${modelId}. Ready to chat.`);
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      webllmEngine = await CreateMLCEngine(modelId, {
+        initProgressCallback: (report) => {
+          setStatus(report.text || "Loading model...");
+        },
+      });
+      setStatus(`Loaded ${modelId}. Ready to chat.`);
+      return;
+    } catch (err) {
+      const isLastAttempt = attempt === maxAttempts;
+      // Hugging Face's CDN occasionally serves a transient error page instead
+      // of the model file; the browser reports that as a CORS failure since
+      // error responses don't carry CORS headers. Retrying usually clears it.
+      if (isLastAttempt) {
+        throw new Error(
+          `${err.message} (failed after ${maxAttempts} attempts — this is ` +
+            "usually a transient Hugging Face CDN hiccup, try Load model again)"
+        );
+      }
+      setStatus(
+        `Download hiccup, retrying (${attempt}/${maxAttempts})...`
+      );
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
 }
 
 async function loadChromeAI() {
