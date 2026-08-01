@@ -1,6 +1,7 @@
-// Client-side LLM chat demo. Three providers, all running fully in-browser:
-//   - "webllm": open-weight tiny models via WebGPU (@mlc-ai/web-llm)
-//   - "transformers": open-weight tiny ONNX models via WASM/WebGPU (@huggingface/transformers)
+// Client-side LLM chat demo. Four providers, all running fully in-browser:
+//   - "webllm": open-weight tiny chat models via WebGPU (@mlc-ai/web-llm)
+//   - "transformers": open-weight tiny chat models via WASM/WebGPU (@huggingface/transformers)
+//   - "caption": image captioning via WASM/WebGPU (@huggingface/transformers)
 //   - "chrome": Chrome's built-in Gemini Nano (window.LanguageModel Prompt API)
 
 const providerModels = {
@@ -12,6 +13,12 @@ const providerModels = {
     { value: "onnx-community/Qwen2.5-0.5B-Instruct", label: "Qwen 2.5 0.5B Instruct (ONNX, q4)", dtype: "q4" },
     { value: "HuggingFaceTB/SmolLM2-135M-Instruct", label: "SmolLM2 135M Instruct (ONNX, very small/fast)" },
   ],
+  caption: [
+    // The default quantized export of this model has a broken decoder graph
+    // ("Missing required scale" DequantizeLinear error) under current ONNX
+    // Runtime Web — fp32 sidesteps it at the cost of a bigger download.
+    { value: "Xenova/vit-gpt2-image-captioning", label: "ViT-GPT2 Image Captioning", dtype: "fp32" },
+  ],
   chrome: [],
 };
 
@@ -22,8 +29,12 @@ const loadBtn = document.getElementById("load-btn");
 const statusEl = document.getElementById("status");
 const chatEl = document.getElementById("chat");
 const form = document.getElementById("chat-form");
+const textControls = document.getElementById("text-controls");
+const imageControls = document.getElementById("image-controls");
 const input = document.getElementById("chat-input");
 const sendBtn = document.getElementById("send-btn");
+const imageInput = document.getElementById("image-input");
+const imageLabel = document.getElementById("image-label");
 
 /** @type {{role: "user"|"assistant", content: string}[]} */
 let history = [];
@@ -31,6 +42,7 @@ let history = [];
 // Active provider handle. Exactly one of these is set after a successful load.
 let webllmEngine = null;
 let transformersPipeline = null;
+let captionerPipeline = null;
 let chromeSession = null;
 
 function setStatus(text, isError = false) {
@@ -41,6 +53,8 @@ function setStatus(text, isError = false) {
 function setChatEnabled(enabled) {
   input.disabled = !enabled;
   sendBtn.disabled = !enabled;
+  imageInput.disabled = !enabled;
+  imageLabel.classList.toggle("disabled", !enabled);
 }
 
 function addBubble(role) {
@@ -48,6 +62,17 @@ function addBubble(role) {
   el.className = `msg ${role}`;
   chatEl.appendChild(el);
   chatEl.scrollTop = chatEl.scrollHeight;
+  return el;
+}
+
+function addImageBubble(file) {
+  const el = addBubble("user");
+  const img = document.createElement("img");
+  img.className = "thumb";
+  img.alt = "uploaded image";
+  img.src = URL.createObjectURL(file);
+  img.onload = () => URL.revokeObjectURL(img.src);
+  el.appendChild(img);
   return el;
 }
 
@@ -63,22 +88,38 @@ function populateModelOptions(provider) {
   modelGroup.style.display = models.length ? "" : "none";
 }
 
+function getSelectedModelConfig() {
+  return providerModels[providerSelect.value].find(
+    (m) => m.value === modelSelect.value
+  );
+}
+
+function syncInputMode(provider) {
+  const isCaption = provider === "caption";
+  textControls.classList.toggle("hidden", isCaption);
+  imageControls.classList.toggle("hidden", !isCaption);
+}
+
 function resetProviderState() {
   webllmEngine = null;
   transformersPipeline = null;
+  captionerPipeline = null;
   chromeSession = null;
   history = [];
   chatEl.innerHTML = "";
+  imageInput.value = "";
   setChatEnabled(false);
 }
 
 providerSelect.addEventListener("change", () => {
   populateModelOptions(providerSelect.value);
+  syncInputMode(providerSelect.value);
   resetProviderState();
   setStatus("");
 });
 
 populateModelOptions(providerSelect.value);
+syncInputMode(providerSelect.value);
 
 // Hugging Face's CDN occasionally serves a transient error page instead of
 // the real model file; browsers report that as a CORS failure since error
@@ -131,8 +172,10 @@ async function loadTransformers() {
   );
 
   const modelId = modelSelect.value;
+  const { dtype } = getSelectedModelConfig();
   transformersPipeline = await withRetries(() =>
     pipeline("text-generation", modelId, {
+      ...(dtype ? { dtype } : {}),
       progress_callback: (progress) => {
         if (progress.status === "progress") {
           const pct = Math.round(progress.progress ?? 0);
@@ -144,6 +187,30 @@ async function loadTransformers() {
     })
   );
   setStatus(`Loaded ${modelId}. Ready to chat.`);
+}
+
+async function loadCaptioner() {
+  setStatus("Loading image captioning model...");
+  const { pipeline } = await import(
+    "https://esm.run/@huggingface/transformers"
+  );
+
+  const modelId = modelSelect.value;
+  const { dtype } = getSelectedModelConfig();
+  captionerPipeline = await withRetries(() =>
+    pipeline("image-to-text", modelId, {
+      ...(dtype ? { dtype } : {}),
+      progress_callback: (progress) => {
+        if (progress.status === "progress") {
+          const pct = Math.round(progress.progress ?? 0);
+          setStatus(`Downloading ${progress.file} (${pct}%)...`);
+        } else {
+          setStatus(`${progress.status}...`);
+        }
+      },
+    })
+  );
+  setStatus(`Loaded ${modelId}. Upload an image to caption it.`);
 }
 
 async function loadChromeAI() {
@@ -178,6 +245,7 @@ async function loadChromeAI() {
 const loaders = {
   webllm: loadWebLLM,
   transformers: loadTransformers,
+  caption: loadCaptioner,
   chrome: loadChromeAI,
 };
 
@@ -257,6 +325,30 @@ const streamers = {
   transformers: streamTransformers,
   chrome: streamChromeAI,
 };
+
+imageInput.addEventListener("change", async () => {
+  const file = imageInput.files[0];
+  if (!file) return;
+  imageInput.value = ""; // allow re-selecting the same file later
+
+  setChatEnabled(false);
+  addImageBubble(file);
+
+  const bubble = addBubble("assistant");
+  bubble.classList.add("pending");
+
+  try {
+    const output = await captionerPipeline(file);
+    bubble.textContent = output[0]?.generated_text ?? "(no caption produced)";
+  } catch (err) {
+    console.error(err);
+    bubble.textContent = `Error: ${err.message ?? err}`;
+    setStatus(err.message ?? String(err), true);
+  } finally {
+    bubble.classList.remove("pending");
+    setChatEnabled(true);
+  }
+});
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();

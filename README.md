@@ -1,8 +1,8 @@
 # clientai
 
-A tiny demo of chatting with an LLM that runs **entirely in the browser** — no server, no API key, no data leaving your machine.
+A tiny demo of chatting with an LLM — and captioning an image — that runs **entirely in the browser**: no server, no API key, no data leaving your machine.
 
-Open `index.html` (via a static server, see below), pick a provider, load the model, and chat.
+Open `index.html` (via a static server, see below), pick a provider, load the model, and chat (or upload an image, for the captioning provider).
 
 ## The client-side LLM landscape
 
@@ -13,7 +13,7 @@ Open `index.html` (via a static server, see below), pick a provider, load the mo
 | **Chrome built-in AI (Gemini Nano)** — used here | Ships inside Chrome itself, exposed via the origin-trial **Prompt API** (`LanguageModel.create()`) | Zero download, fastest to start; Chrome-only, requires enabling `chrome://flags/#prompt-api-for-gemini-nano` (or an origin trial token), and the model itself isn't user-chosen |
 | wllama | llama.cpp compiled to WASM, runs GGUF models | Good for llama.cpp-family models client-side; WASM-only means slower than WebGPU-backed WebLLM |
 
-This demo implements the first three, covering the main points on the tradeoff curve (bring-your-own model over WebGPU, bring-your-own model over WASM for broader compatibility, and zero-download built-in model) with no build step required.
+This demo implements the first three for text chat, plus a fourth mode using Transformers.js for **image captioning** (a vision task, not text chat) — covering both ends of the text tradeoff curve (bring-your-own model over WebGPU vs. WASM vs. zero-download built-in) and showing the same runtime handles more than just chat, with no build step required.
 
 ## Running it
 
@@ -28,6 +28,7 @@ Then open `http://localhost:8000` in a recent Chrome or Edge.
 
 - **WebLLM**: select it, pick a model, click "Load model". First load downloads and compiles the model (progress shown), then it's cached for next time.
 - **Transformers.js**: select it, pick a model (SmolLM2 135M is fastest to try first — no WebGPU required), click "Load model". Also cached after first load.
+- **Transformers.js (image captioning)**: select it, click "Load model", then use "Choose an image…" to upload a photo — it's captioned on-device (no chat, just image in, caption out).
 - **Chrome built-in Gemini Nano**: select it, click "Load model". If unavailable, the status line explains why (usually the `chrome://flags/#prompt-api-for-gemini-nano` flag needs enabling).
 
-Both WebLLM and Transformers.js download model weights from Hugging Face on first use; that CDN occasionally serves a transient error for a request (surfaces in the browser as a CORS-looking failure). The app retries automatically a few times before giving up — if it still fails, just click "Load model" again.
+WebLLM and both Transformers.js modes download model weights from Hugging Face on first use; that CDN occasionally serves a transient error for a request (surfaces in the browser as a CORS-looking failure). The app retries automatically a few times before giving up — if it still fails, just click "Load model" again.

@@ -19,6 +19,7 @@
         <select id="provider">
           <option value="webllm">WebLLM (tiny open-weight model, WebGPU)</option>
           <option value="transformers">Transformers.js (tiny ONNX model, WASM/WebGPU)</option>
+          <option value="caption">Transformers.js (image captioning)</option>
           <option value="chrome">Chrome built-in Gemini Nano</option>
         </select>
       </div>
@@ -36,8 +37,14 @@
     <div id="chat" class="chat" aria-live="polite"></div>
 
     <form id="chat-form" class="chat-form">
-      <input id="chat-input" type="text" placeholder="Say something..." autocomplete="off" disabled />
-      <button id="send-btn" type="submit" disabled>Send</button>
+      <div id="text-controls" class="input-mode">
+        <input id="chat-input" type="text" placeholder="Say something..." autocomplete="off" disabled />
+        <button id="send-btn" type="submit" disabled>Send</button>
+      </div>
+      <div id="image-controls" class="input-mode hidden">
+        <input id="image-input" type="file" accept="image/*" class="file-input" disabled />
+        <label id="image-label" for="image-input" class="upload-btn">Choose an image…</label>
+      </div>
     </form>
   </div>
 
