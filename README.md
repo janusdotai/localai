@@ -32,3 +32,5 @@ Then open `http://localhost:8000` in a recent Chrome or Edge.
 - **Chrome built-in Gemini Nano**: select it, click "Load model". If unavailable, the status line explains why (usually the `chrome://flags/#prompt-api-for-gemini-nano` flag needs enabling).
 
 WebLLM and both Transformers.js modes download model weights from Hugging Face on first use; that CDN occasionally serves a transient error for a request (surfaces in the browser as a CORS-looking failure). The app retries automatically a few times before giving up — if it still fails, just click "Load model" again.
+
+If you deploy this to a `*.workers.dev` subdomain: Hugging Face's CDN blocks requests whose `Referer` is a `workers.dev` domain (likely anti-scraping protection), which made model downloads fail every time on that hosting. `index.html` already includes `<meta name="referrer" content="no-referrer">` to work around it — no action needed, but worth knowing if you fork this and see it fail consistently only when deployed (and not locally).

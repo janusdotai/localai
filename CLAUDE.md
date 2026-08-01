@@ -36,11 +36,15 @@ Other client-side options that exist but weren't built into this demo (documente
   - Shared `history` array of `{role, content}` messages feeds whichever chat provider is active (captioning doesn't use it — each image is captioned independently).
 - `style.css` — full-viewport flex layout (header/controls/status fixed height, chat log fills remaining space), responsive down to mobile widths.
 
-## Known issue: Hugging Face CDN flakiness
+## Known issue: Hugging Face blocks `*.workers.dev` referrers (fixed)
 
-Both WebLLM and Transformers.js pull model weights from `huggingface.co` on first load. That CDN intermittently serves a CloudFront error page instead of the real file; since error responses don't carry CORS headers, the browser reports it as a CORS failure rather than the real transient status — confirmed via direct `curl` testing (same URL flipping between 200 and 404 across successive requests) and via Chrome DevTools Protocol network inspection (`corsErrorStatus.corsError: "MissingAllowOriginHeader"` on what was actually a 404 CloudFront error page). This is not a bug in the app's CORS setup or Cloudflare config.
+When deployed to a Cloudflare Workers `*.workers.dev` subdomain, every model download from `huggingface.co` failed deterministically with what Chrome reported as a CORS error (`corsErrorStatus.corsError: "MissingAllowOriginHeader"`), even though the server's CORS headers were correct. Root-caused via a curl header-by-header bisection against the live deployed URL: Hugging Face's CDN returns a CloudFront 404 error page — with no CORS headers, hence the browser's misleading CORS-shaped error — specifically when the request's `Referer` header is any `*.workers.dev` domain (tested two unrelated `workers.dev` subdomains, both blocked; `pages.dev`/`example.com`/`localhost` referrers all succeeded). This is almost certainly anti-scraping protection against that shared, anonymous subdomain space, not a bug in this app's CORS/fetch setup.
 
-`withRetries()` in `app.js` retries model loads up to 3 times with backoff to smooth over this. If it still fails after that, the status line says so explicitly and suggests clicking "Load model" again.
+Fix: `<meta name="referrer" content="no-referrer">` in `index.html` suppresses the `Referer` header on all outgoing requests from the page, including the ones WebLLM/Transformers.js issue internally — confirmed via CDP that no request carries a `Referer` header after adding it. This also explains why WebLLM appeared to fail even after the retry logic below was added: a real browser always sends `Referer` by default, so every attempt was hitting the same deterministic block; earlier `curl` diagnostics happened not to set a `Referer` and so only ever observed the separate, genuinely intermittent CDN flakiness described next.
+
+## Known issue: Hugging Face CDN flakiness (separate from the above)
+
+Independent of the referrer block, `huggingface.co` intermittently serves a CloudFront error page instead of the real file on a plain, unblocked request (confirmed via repeated `curl` with no special headers: same URL flipping between 200 and 404 across successive requests). `withRetries()` in `app.js` retries model loads up to 3 times with backoff to smooth over this. If it still fails after that, the status line says so explicitly and suggests clicking "Load model" again.
 
 ## Running it
 

@@ -3,6 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!--
+    Hugging Face's CDN blocks requests whose Referer header is a *.workers.dev
+    domain (likely anti-scraping protection on that shared/anonymous subdomain
+    space) — confirmed by testing with and without the header. WebLLM and
+    Transformers.js fetch model weights from huggingface.co, so suppress the
+    Referer entirely for all outgoing requests from this page.
+  -->
+  <meta name="referrer" content="no-referrer" />
   <title>Client-side LLM Chat</title>
   <link rel="stylesheet" href="style.css" />
 </head>
