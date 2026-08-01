@@ -4,7 +4,7 @@
 
 const providerSelect = document.getElementById("provider");
 const modelSelect = document.getElementById("model");
-const modelLabel = document.getElementById("model-label");
+const modelGroup = document.getElementById("model-group");
 const loadBtn = document.getElementById("load-btn");
 const statusEl = document.getElementById("status");
 const chatEl = document.getElementById("chat");
@@ -39,8 +39,7 @@ function addBubble(role) {
 
 function syncModelVisibility() {
   const isWebllm = providerSelect.value === "webllm";
-  modelSelect.style.display = isWebllm ? "" : "none";
-  modelLabel.style.display = isWebllm ? "" : "none";
+  modelGroup.style.display = isWebllm ? "" : "none";
 }
 
 function resetProviderState() {

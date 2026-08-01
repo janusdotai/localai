@@ -14,17 +14,21 @@
     </header>
 
     <div class="controls">
-      <label for="provider">Provider</label>
-      <select id="provider">
-        <option value="webllm">WebLLM (tiny open-weight model, WebGPU)</option>
-        <option value="chrome">Chrome built-in Gemini Nano</option>
-      </select>
+      <div class="control-group">
+        <label for="provider">Provider</label>
+        <select id="provider">
+          <option value="webllm">WebLLM (tiny open-weight model, WebGPU)</option>
+          <option value="chrome">Chrome built-in Gemini Nano</option>
+        </select>
+      </div>
 
-      <label for="model" id="model-label">Model</label>
-      <select id="model">
-        <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B Instruct (q4f16)</option>
-        <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen 2.5 0.5B Instruct (q4f16)</option>
-      </select>
+      <div class="control-group" id="model-group">
+        <label for="model" id="model-label">Model</label>
+        <select id="model">
+          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B Instruct (q4f16)</option>
+          <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen 2.5 0.5B Instruct (q4f16)</option>
+        </select>
+      </div>
 
       <button id="load-btn">Load model</button>
     </div>
