@@ -1,6 +1,19 @@
-// Client-side LLM chat demo. Two providers, both running fully in-browser:
+// Client-side LLM chat demo. Three providers, all running fully in-browser:
 //   - "webllm": open-weight tiny models via WebGPU (@mlc-ai/web-llm)
+//   - "transformers": open-weight tiny ONNX models via WASM/WebGPU (@huggingface/transformers)
 //   - "chrome": Chrome's built-in Gemini Nano (window.LanguageModel Prompt API)
+
+const providerModels = {
+  webllm: [
+    { value: "Llama-3.2-1B-Instruct-q4f16_1-MLC", label: "Llama 3.2 1B Instruct (q4f16)" },
+    { value: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 0.5B Instruct (q4f16)" },
+  ],
+  transformers: [
+    { value: "onnx-community/Qwen2.5-0.5B-Instruct", label: "Qwen 2.5 0.5B Instruct (ONNX, q4)", dtype: "q4" },
+    { value: "HuggingFaceTB/SmolLM2-135M-Instruct", label: "SmolLM2 135M Instruct (ONNX, very small/fast)" },
+  ],
+  chrome: [],
+};
 
 const providerSelect = document.getElementById("provider");
 const modelSelect = document.getElementById("model");
@@ -17,6 +30,7 @@ let history = [];
 
 // Active provider handle. Exactly one of these is set after a successful load.
 let webllmEngine = null;
+let transformersPipeline = null;
 let chromeSession = null;
 
 function setStatus(text, isError = false) {
@@ -37,13 +51,21 @@ function addBubble(role) {
   return el;
 }
 
-function syncModelVisibility() {
-  const isWebllm = providerSelect.value === "webllm";
-  modelGroup.style.display = isWebllm ? "" : "none";
+function populateModelOptions(provider) {
+  const models = providerModels[provider];
+  modelSelect.innerHTML = "";
+  for (const { value, label } of models) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    modelSelect.appendChild(opt);
+  }
+  modelGroup.style.display = models.length ? "" : "none";
 }
 
 function resetProviderState() {
   webllmEngine = null;
+  transformersPipeline = null;
   chromeSession = null;
   history = [];
   chatEl.innerHTML = "";
@@ -51,12 +73,33 @@ function resetProviderState() {
 }
 
 providerSelect.addEventListener("change", () => {
-  syncModelVisibility();
+  populateModelOptions(providerSelect.value);
   resetProviderState();
   setStatus("");
 });
 
-syncModelVisibility();
+populateModelOptions(providerSelect.value);
+
+// Hugging Face's CDN occasionally serves a transient error page instead of
+// the real model file; browsers report that as a CORS failure since error
+// responses don't carry CORS headers. Both WebLLM and Transformers.js pull
+// model weights from Hugging Face, so both benefit from a short retry.
+async function withRetries(fn, { maxAttempts = 3 } = {}) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        throw new Error(
+          `${err.message} (failed after ${maxAttempts} attempts — this is ` +
+            "usually a transient Hugging Face CDN hiccup, try Load model again)"
+        );
+      }
+      setStatus(`Download hiccup, retrying (${attempt}/${maxAttempts})...`);
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
+}
 
 async function loadWebLLM() {
   setStatus("Loading WebLLM engine...");
@@ -71,33 +114,36 @@ async function loadWebLLM() {
   }
 
   const modelId = modelSelect.value;
-  const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      webllmEngine = await CreateMLCEngine(modelId, {
-        initProgressCallback: (report) => {
-          setStatus(report.text || "Loading model...");
-        },
-      });
-      setStatus(`Loaded ${modelId}. Ready to chat.`);
-      return;
-    } catch (err) {
-      const isLastAttempt = attempt === maxAttempts;
-      // Hugging Face's CDN occasionally serves a transient error page instead
-      // of the model file; the browser reports that as a CORS failure since
-      // error responses don't carry CORS headers. Retrying usually clears it.
-      if (isLastAttempt) {
-        throw new Error(
-          `${err.message} (failed after ${maxAttempts} attempts — this is ` +
-            "usually a transient Hugging Face CDN hiccup, try Load model again)"
-        );
-      }
-      setStatus(
-        `Download hiccup, retrying (${attempt}/${maxAttempts})...`
-      );
-      await new Promise((r) => setTimeout(r, 1000 * attempt));
-    }
-  }
+  webllmEngine = await withRetries(() =>
+    CreateMLCEngine(modelId, {
+      initProgressCallback: (report) => {
+        setStatus(report.text || "Loading model...");
+      },
+    })
+  );
+  setStatus(`Loaded ${modelId}. Ready to chat.`);
+}
+
+async function loadTransformers() {
+  setStatus("Loading Transformers.js...");
+  const { pipeline } = await import(
+    "https://esm.run/@huggingface/transformers"
+  );
+
+  const modelId = modelSelect.value;
+  transformersPipeline = await withRetries(() =>
+    pipeline("text-generation", modelId, {
+      progress_callback: (progress) => {
+        if (progress.status === "progress") {
+          const pct = Math.round(progress.progress ?? 0);
+          setStatus(`Downloading ${progress.file} (${pct}%)...`);
+        } else {
+          setStatus(`${progress.status}...`);
+        }
+      },
+    })
+  );
+  setStatus(`Loaded ${modelId}. Ready to chat.`);
 }
 
 async function loadChromeAI() {
@@ -129,16 +175,18 @@ async function loadChromeAI() {
   setStatus("Gemini Nano ready. Ready to chat.");
 }
 
+const loaders = {
+  webllm: loadWebLLM,
+  transformers: loadTransformers,
+  chrome: loadChromeAI,
+};
+
 loadBtn.addEventListener("click", async () => {
   loadBtn.disabled = true;
   setChatEnabled(false);
   resetProviderState();
   try {
-    if (providerSelect.value === "webllm") {
-      await loadWebLLM();
-    } else {
-      await loadChromeAI();
-    }
+    await loaders[providerSelect.value]();
     setChatEnabled(true);
   } catch (err) {
     console.error(err);
@@ -163,6 +211,30 @@ async function streamWebLLM(bubble) {
   return full;
 }
 
+async function streamTransformers(bubble) {
+  const { TextStreamer } = await import(
+    "https://esm.run/@huggingface/transformers"
+  );
+
+  let full = "";
+  const streamer = new TextStreamer(transformersPipeline.tokenizer, {
+    skip_prompt: true,
+    skip_special_tokens: true,
+    callback_function: (text) => {
+      full += text;
+      bubble.textContent = full;
+      chatEl.scrollTop = chatEl.scrollHeight;
+    },
+  });
+
+  await transformersPipeline(history, {
+    max_new_tokens: 512,
+    do_sample: false,
+    streamer,
+  });
+  return full;
+}
+
 async function streamChromeAI(bubble) {
   const lastUserMessage = history[history.length - 1].content;
   const stream = chromeSession.promptStreaming(lastUserMessage);
@@ -180,6 +252,12 @@ async function streamChromeAI(bubble) {
   return full;
 }
 
+const streamers = {
+  webllm: streamWebLLM,
+  transformers: streamTransformers,
+  chrome: streamChromeAI,
+};
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = input.value.trim();
@@ -195,10 +273,7 @@ form.addEventListener("submit", async (e) => {
   bubble.classList.add("pending");
 
   try {
-    const reply =
-      providerSelect.value === "webllm"
-        ? await streamWebLLM(bubble)
-        : await streamChromeAI(bubble);
+    const reply = await streamers[providerSelect.value](bubble);
     history.push({ role: "assistant", content: reply });
   } catch (err) {
     console.error(err);
