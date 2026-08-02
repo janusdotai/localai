@@ -417,6 +417,10 @@ function clearChat() {
   if (providerSelect.value === "vqa") input.placeholder = "Attach an image to start…";
   currentSessionId = null;
   updateEmptyState();
+  // Re-derive enabled state now that vqaImage was just reset — without this,
+  // an input left enabled from a prior exchange stays enabled with no image
+  // attached, letting a text-only submit through with a null image.
+  setChatEnabled(loadedModelKey === `${providerSelect.value}:${modelSelect.value}`);
 }
 
 function resetEngineHandles() {
