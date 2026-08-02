@@ -602,6 +602,10 @@ body {
   display: none;
 }
 
+#vqa-attach-label.hidden {
+  display: none;
+}
+
 .file-input {
   position: absolute;
   width: 1px;

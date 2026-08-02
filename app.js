@@ -1,7 +1,8 @@
-// Client-side LLM chat demo. Four providers, all running fully in-browser:
+// Client-side LLM chat demo. Five providers, all running fully in-browser:
 //   - "webllm": open-weight tiny chat models via WebGPU (@mlc-ai/web-llm)
 //   - "transformers": open-weight tiny chat models via WASM/WebGPU (@huggingface/transformers)
-//   - "caption": image captioning via WASM/WebGPU (@huggingface/transformers)
+//   - "caption": one-shot image captioning via WASM/WebGPU (@huggingface/transformers)
+//   - "vqa": multi-turn "chat about an image" via WASM/WebGPU (@huggingface/transformers)
 //   - "chrome": Chrome's built-in Gemini Nano (window.LanguageModel Prompt API)
 
 // sizeEstimate is a rough, approximate download size shown in the confirm
@@ -21,6 +22,9 @@ const providerModels = {
     // Runtime Web — fp32 sidesteps it at the cost of a bigger download.
     { value: "Xenova/vit-gpt2-image-captioning", label: "ViT-GPT2 Image Captioning", dtype: "fp32", sizeEstimate: "~800 MB" },
   ],
+  vqa: [
+    { value: "HuggingFaceTB/SmolVLM-500M-Instruct", label: "SmolVLM 500M Instruct (image Q&A)", dtype: "q4", sizeEstimate: "~340 MB" },
+  ],
   chrome: [],
 };
 
@@ -38,6 +42,8 @@ const input = document.getElementById("chat-input");
 const sendBtn = document.getElementById("send-btn");
 const imageInput = document.getElementById("image-input");
 const imageLabel = document.getElementById("image-label");
+const vqaImageInput = document.getElementById("vqa-image-input");
+const vqaAttachLabel = document.getElementById("vqa-attach-label");
 const loadModal = document.getElementById("load-modal");
 const modalTitle = document.getElementById("modal-title");
 const modalModelName = document.getElementById("modal-model-name");
@@ -76,11 +82,19 @@ let webllmEngine = null;
 // main thread, so a long generation can never block this tab's UI.
 let transformersPipeline = null;
 let captionerPipeline = null;
+let vqaPipeline = null;
 // "provider:modelValue" of whichever engine is actually loaded right now —
 // distinct from providerSelect/modelSelect, which just reflect the current
 // dropdown selection and can change without a new load happening.
 let loadedModelKey = null;
 let chromeSession = null;
+
+// VQA ("chat about an image") state — deliberately separate from `history`:
+// it's never persisted to `chatSessions`/localStorage (see clearChat()), and
+// its first turn embeds an image, a shape the text-chat providers never use.
+let vqaImage = null;
+/** @type {{role: "user"|"assistant", content: string}[]} */
+let vqaMessages = [];
 
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
@@ -164,6 +178,7 @@ const providerLabels = {
   webllm: "WebLLM",
   transformers: "Transformers.js",
   caption: "Transformers.js (captioning)",
+  vqa: "Transformers.js (image Q&A)",
   chrome: "Chrome built-in AI",
 };
 
@@ -315,10 +330,14 @@ settingsClearAllBtn.addEventListener("click", async () => {
 });
 
 function setChatEnabled(enabled) {
-  input.disabled = !enabled;
-  sendBtn.disabled = !enabled;
+  // In VQA mode, the text input additionally requires an image to already be
+  // attached for the current session — nothing to ask a question about yet.
+  const vqaReady = providerSelect.value !== "vqa" || vqaImage !== null;
+  input.disabled = !enabled || !vqaReady;
+  sendBtn.disabled = !enabled || !vqaReady;
   imageInput.disabled = !enabled;
   imageLabel.classList.toggle("disabled", !enabled);
+  vqaImageInput.disabled = !enabled;
 }
 
 // Before any messages exist, the composer floats centered in the pane
@@ -379,6 +398,9 @@ function syncInputMode(provider) {
   const isCaption = provider === "caption";
   textControls.classList.toggle("hidden", isCaption);
   imageControls.classList.toggle("hidden", !isCaption);
+  vqaAttachLabel.classList.toggle("hidden", provider !== "vqa");
+  input.placeholder =
+    provider === "vqa" ? "Attach an image to start…" : "Say something...";
 }
 
 // Clears the visible conversation only — the loaded engine (if any) stays
@@ -389,6 +411,10 @@ function clearChat() {
   history = [];
   chatInner.innerHTML = "";
   imageInput.value = "";
+  vqaImageInput.value = "";
+  vqaImage = null;
+  vqaMessages = [];
+  if (providerSelect.value === "vqa") input.placeholder = "Attach an image to start…";
   currentSessionId = null;
   updateEmptyState();
 }
@@ -397,6 +423,7 @@ function resetEngineHandles() {
   webllmEngine = null;
   transformersPipeline = null;
   captionerPipeline = null;
+  vqaPipeline = null;
   chromeSession = null;
   loadedModelKey = null;
   terminateTransformersWorker();
@@ -683,7 +710,7 @@ function terminateTransformersWorker() {
   }
 }
 
-function workerLoad(task, modelId, dtype, onProgress) {
+function workerLoad(task, modelId, dtype, onProgress, messageType = "load", device = undefined) {
   const worker = getTransformersWorker();
   return new Promise((resolve, reject) => {
     function cleanup() {
@@ -708,11 +735,11 @@ function workerLoad(task, modelId, dtype, onProgress) {
     }
     worker.addEventListener("message", handleMessage);
     worker.addEventListener("error", handleError);
-    worker.postMessage({ type: "load", task, modelId, dtype });
+    worker.postMessage({ type: messageType, task, modelId, dtype, device });
   });
 }
 
-function workerGenerate(conversationHistory, onToken) {
+function workerGenerate(conversationHistory, onToken, messageType = "generate") {
   const worker = getTransformersWorker();
   return new Promise((resolve, reject) => {
     let full = "";
@@ -739,7 +766,7 @@ function workerGenerate(conversationHistory, onToken) {
     }
     worker.addEventListener("message", handleMessage);
     worker.addEventListener("error", handleError);
-    worker.postMessage({ type: "generate", history: conversationHistory });
+    worker.postMessage({ type: messageType, history: conversationHistory, messages: conversationHistory });
   });
 }
 
@@ -770,26 +797,56 @@ function workerCaption(file) {
   });
 }
 
-async function loadTransformers() {
-  setLoadProgress("Loading Transformers.js...");
+async function loadTransformersTask(task, loadingMessage, readyMessage, messageType = "load", device = undefined) {
+  setLoadProgress(loadingMessage);
   const modelId = modelSelect.value;
   const { dtype } = getSelectedModelConfig();
   await withRetries(() =>
-    workerLoad("text-generation", modelId, dtype, transformersProgressCallback)
+    workerLoad(task, modelId, dtype, transformersProgressCallback, messageType, device)
   );
+  setLoadProgress(`Loaded ${modelId}. ${readyMessage}`, 100);
+}
+
+async function loadTransformers() {
+  await loadTransformersTask("text-generation", "Loading Transformers.js...", "Ready to chat.");
   transformersPipeline = true;
-  setLoadProgress(`Loaded ${modelId}. Ready to chat.`, 100);
 }
 
 async function loadCaptioner() {
-  setLoadProgress("Loading image captioning model...");
-  const modelId = modelSelect.value;
-  const { dtype } = getSelectedModelConfig();
-  await withRetries(() =>
-    workerLoad("image-to-text", modelId, dtype, transformersProgressCallback)
+  await loadTransformersTask(
+    "image-to-text",
+    "Loading image captioning model...",
+    "Upload an image to caption it."
   );
   captionerPipeline = true;
-  setLoadProgress(`Loaded ${modelId}. Upload an image to caption it.`, 100);
+}
+
+async function loadVqa() {
+  // Doesn't use the "image-text-to-text" pipeline task — confirmed against
+  // the actual bundled source that the current @huggingface/transformers
+  // release's pipeline() registry doesn't include it. The worker's
+  // "load-vqa"/"vqa-generate" messages use the lower-level AutoProcessor +
+  // AutoModelForVision2Seq API instead (see transformers-worker.js).
+  //
+  // Unlike the other Transformers.js providers, WebGPU isn't optional here:
+  // tested on WASM/CPU and a single short reply took over 3 minutes without
+  // finishing (vs. seconds for the text-only SmolLM2 provider) — the vision
+  // encoder makes this model meaningfully heavier. Same requirement and
+  // error pattern as loadWebLLM().
+  if (!navigator.gpu) {
+    throw new Error(
+      "WebGPU is not available in this browser. Image Q&A needs it — WASM " +
+        "alone is impractically slow for this model. Try a recent Chrome/Edge."
+    );
+  }
+  await loadTransformersTask(
+    "image-text-to-text",
+    "Loading image Q&A model...",
+    "Attach an image to start asking questions.",
+    "load-vqa",
+    "webgpu"
+  );
+  vqaPipeline = true;
 }
 
 async function loadChromeAI() {
@@ -825,6 +882,7 @@ const loaders = {
   webllm: loadWebLLM,
   transformers: loadTransformers,
   caption: loadCaptioner,
+  vqa: loadVqa,
   chrome: loadChromeAI,
 };
 
@@ -929,6 +987,29 @@ async function streamTransformers(bubble) {
   });
 }
 
+// VQA messages mirror the text-chat {role, content} shape everywhere except
+// the very first user turn, which embeds the attached image alongside the
+// question — the worker's "generate" handler just forwards whatever shape
+// it's given straight into the pipeline, so no worker changes were needed.
+function buildVqaPayload() {
+  return vqaMessages.map((msg, i) =>
+    i === 0
+      ? { role: msg.role, content: [{ type: "image", image: vqaImage }, { type: "text", text: msg.content }] }
+      : { role: msg.role, content: msg.content }
+  );
+}
+
+async function streamVqa(bubble) {
+  return workerGenerate(
+    buildVqaPayload(),
+    (fullText) => {
+      renderAssistantMarkdown(bubble, fullText);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    },
+    "vqa-generate"
+  );
+}
+
 async function streamChromeAI(bubble) {
   const lastUserMessage = history[history.length - 1].content;
   const stream = chromeSession.promptStreaming(lastUserMessage);
@@ -949,6 +1030,7 @@ async function streamChromeAI(bubble) {
 const streamers = {
   webllm: streamWebLLM,
   transformers: streamTransformers,
+  vqa: streamVqa,
   chrome: streamChromeAI,
 };
 
@@ -976,15 +1058,36 @@ imageInput.addEventListener("change", async () => {
   }
 });
 
+// Attaching an image in VQA mode doesn't generate anything by itself — it
+// just starts (or restarts) the image conversation and unlocks the text
+// input, mirroring "Attach an image to start…" in the placeholder.
+vqaImageInput.addEventListener("change", () => {
+  const file = vqaImageInput.files[0];
+  if (!file) return;
+  vqaImageInput.value = "";
+
+  vqaImage = file;
+  vqaMessages = [];
+  chatInner.innerHTML = "";
+  addImageBubble(file);
+  updateEmptyState();
+
+  input.placeholder = "Ask about this image...";
+  setChatEnabled(true);
+  input.focus();
+});
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = input.value.trim();
   if (!text) return;
+  const isVqa = providerSelect.value === "vqa";
 
   input.value = "";
   setChatEnabled(false);
 
-  history.push({ role: "user", content: text });
+  const targetHistory = isVqa ? vqaMessages : history;
+  targetHistory.push({ role: "user", content: text });
   addBubble("user").textContent = text;
 
   const bubble = addBubble("assistant");
@@ -992,7 +1095,7 @@ form.addEventListener("submit", async (e) => {
 
   try {
     const reply = await streamers[providerSelect.value](bubble);
-    history.push({ role: "assistant", content: reply });
+    targetHistory.push({ role: "assistant", content: reply });
   } catch (err) {
     console.error(err);
     bubble.textContent = `Error: ${err.message ?? err}`;
@@ -1001,6 +1104,8 @@ form.addEventListener("submit", async (e) => {
     bubble.classList.remove("pending");
     setChatEnabled(true);
     input.focus();
-    upsertCurrentSession();
+    // VQA sessions include an in-memory image and aren't persisted to
+    // localStorage — see the note on `vqaImage`/`vqaMessages` above.
+    if (!isVqa) upsertCurrentSession();
   }
 });
