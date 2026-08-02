@@ -80,7 +80,11 @@ self.onmessage = async (e) => {
           }
           templateMessages.push({ role: m.role, content: parts });
         } else {
-          templateMessages.push({ role: m.role, content: m.content });
+          // SmolVLM's chat template does `for item in message.content`, so
+          // even text-only turns need content as a list of typed parts —
+          // a raw string throws "Expected iterable or object type in for
+          // loop: got StringValue" (confirmed via testing, not assumed).
+          templateMessages.push({ role: m.role, content: [{ type: "text", text: m.content }] });
         }
       }
 
