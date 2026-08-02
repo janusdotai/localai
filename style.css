@@ -103,20 +103,28 @@ body {
   flex: 0 0 auto;
 }
 
-.sidebar-new-chat {
+.icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
   width: 100%;
-  padding: 0.6rem 0.85rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg);
+  padding: 0.5rem 0.6rem;
+  border: none;
+  background: transparent;
   color: var(--fg);
-  font-size: 0.9rem;
-  font-weight: 600;
+  border-radius: 8px;
+  font-size: 0.88rem;
   cursor: pointer;
   text-align: left;
 }
 
-.sidebar-new-chat:hover {
+.sidebar-nav-item:hover {
   background: var(--bubble-assistant);
 }
 
@@ -203,8 +211,8 @@ body {
 
 .sidebar-chat-delete {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -212,10 +220,13 @@ body {
   background: transparent;
   color: var(--muted);
   border-radius: 4px;
-  font-size: 0.95rem;
-  line-height: 1;
   cursor: pointer;
   opacity: 0;
+}
+
+.sidebar-chat-delete .icon {
+  width: 14px;
+  height: 14px;
 }
 
 .sidebar-chat-item:hover .sidebar-chat-delete,
@@ -244,6 +255,7 @@ body {
 }
 
 .main {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -260,51 +272,6 @@ body {
   gap: 0.75rem;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border);
-}
-
-.hamburger-btn {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: pointer;
-}
-
-.hamburger-btn:hover {
-  background: var(--bubble-assistant);
-}
-
-.hamburger {
-  position: relative;
-  display: block;
-  width: 18px;
-  height: 2px;
-  background: var(--fg);
-  border-radius: 2px;
-}
-
-.hamburger::before,
-.hamburger::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  width: 18px;
-  height: 2px;
-  background: var(--fg);
-  border-radius: 2px;
-}
-
-.hamburger::before {
-  top: -6px;
-}
-
-.hamburger::after {
-  top: 6px;
 }
 
 .topbar-title {
@@ -328,8 +295,6 @@ body {
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
-  font-size: 1.1rem;
-  line-height: 1;
   cursor: pointer;
 }
 
@@ -373,16 +338,12 @@ body {
   color: var(--fg);
 }
 
-#load-btn,
-.settings-btn {
+#load-btn {
   width: 100%;
   padding: 0.55rem 0.75rem;
   border-radius: 8px;
   font-size: 0.85rem;
   cursor: pointer;
-}
-
-#load-btn {
   background: var(--accent);
   border: 1px solid var(--accent);
   color: #fff;
@@ -392,12 +353,6 @@ body {
 #load-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.settings-btn {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--fg);
 }
 
 /* ---------- Chat area ---------- */
@@ -496,6 +451,54 @@ body {
   padding: 0.75rem 1rem 1rem;
 }
 
+/* Before any messages exist, the composer floats centered in the pane
+   (like Grok/OpenWebUI's empty state) instead of sitting pinned to the
+   bottom; .chat is simply empty behind it at that point. */
+.main.is-empty .composer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  max-width: 48rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.composer-hero {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+  text-align: center;
+}
+
+.main.is-empty .composer-hero {
+  display: flex;
+}
+
+.composer-hero-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--bubble-assistant);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+}
+
+.composer-hero-icon .icon {
+  width: 22px;
+  height: 22px;
+}
+
+#composer-hero-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
 .chat-form {
   max-width: 48rem;
   margin: 0 auto;
@@ -537,6 +540,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0.5rem;
   padding: 0.5rem 1rem;
   border-radius: 999px;
   border: 1px solid var(--accent);
@@ -572,10 +576,14 @@ body {
   background: var(--accent);
   color: #fff;
   cursor: pointer;
-  font-size: 0.85rem;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+#send-btn .icon {
+  width: 18px;
+  height: 18px;
 }
 
 #send-btn:disabled,

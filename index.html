@@ -13,7 +13,10 @@
 
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-top">
-        <button id="new-chat-btn" type="button" class="sidebar-new-chat">+ New chat</button>
+        <button id="new-chat-btn" type="button" class="sidebar-nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" /></svg>
+          <span>New chat</span>
+        </button>
       </div>
 
       <div class="sidebar-section">
@@ -43,7 +46,10 @@
         </div>
 
         <button id="load-btn" type="button" class="sidebar-load-btn">Load model</button>
-        <button id="settings-btn" type="button" class="settings-btn">Storage</button>
+        <button id="settings-btn" type="button" class="sidebar-nav-item">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></svg>
+          <span>Storage</span>
+        </button>
 
         <div class="sidebar-user">Guest · Local session</div>
       </div>
@@ -51,11 +57,13 @@
 
     <div class="main">
       <div class="topbar">
-        <button id="sidebar-toggle" type="button" class="hamburger-btn" aria-label="Toggle sidebar">
-          <span class="hamburger"></span>
+        <button id="sidebar-toggle" type="button" class="icon-btn" aria-label="Toggle sidebar">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /></svg>
         </button>
         <div id="topbar-title" class="topbar-title">No model loaded</div>
-        <button id="topbar-new-chat" type="button" class="icon-btn" aria-label="New chat">+</button>
+        <button id="topbar-new-chat" type="button" class="icon-btn" aria-label="New chat">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" /></svg>
+        </button>
       </div>
 
       <div id="status" class="status" role="status"></div>
@@ -65,14 +73,25 @@
       </div>
 
       <div class="composer">
+        <div id="composer-hero" class="composer-hero">
+          <div class="composer-hero-icon">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+          </div>
+          <div id="composer-hero-title">No model loaded</div>
+        </div>
         <form id="chat-form" class="chat-form">
           <div id="text-controls" class="input-mode">
             <input id="chat-input" type="text" placeholder="Say something..." autocomplete="off" disabled />
-            <button id="send-btn" type="submit" disabled>Send</button>
+            <button id="send-btn" type="submit" disabled aria-label="Send message">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
+            </button>
           </div>
           <div id="image-controls" class="input-mode hidden">
             <input id="image-input" type="file" accept="image/*" class="file-input" disabled />
-            <label id="image-label" for="image-input" class="upload-btn">Choose an image…</label>
+            <label id="image-label" for="image-input" class="upload-btn">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg>
+              <span>Choose an image…</span>
+            </label>
           </div>
         </form>
       </div>

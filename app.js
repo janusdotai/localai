@@ -61,6 +61,8 @@ const sidebarToggle = document.getElementById("sidebar-toggle");
 const newChatBtn = document.getElementById("new-chat-btn");
 const topbarNewChatBtn = document.getElementById("topbar-new-chat");
 const topbarTitle = document.getElementById("topbar-title");
+const mainEl = document.querySelector(".main");
+const composerHeroTitle = document.getElementById("composer-hero-title");
 const sidebarChatsEl = document.getElementById("sidebar-chats");
 const clearHistoryBtn = document.getElementById("clear-history-btn");
 
@@ -316,6 +318,13 @@ function setChatEnabled(enabled) {
   imageLabel.classList.toggle("disabled", !enabled);
 }
 
+// Before any messages exist, the composer floats centered in the pane
+// (see .main.is-empty in style.css); once there's content, it's pinned to
+// the bottom like a normal chat.
+function updateEmptyState() {
+  mainEl.classList.toggle("is-empty", chatInner.children.length === 0);
+}
+
 function addBubble(role) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
@@ -329,6 +338,7 @@ function addBubble(role) {
 
   row.append(avatar, bubble);
   chatInner.appendChild(row);
+  updateEmptyState();
   chatEl.scrollTop = chatEl.scrollHeight;
   return bubble;
 }
@@ -377,6 +387,7 @@ function clearChat() {
   chatInner.innerHTML = "";
   imageInput.value = "";
   currentSessionId = null;
+  updateEmptyState();
 }
 
 function resetEngineHandles() {
@@ -399,9 +410,11 @@ function updateTopbarTitle() {
   const config = getSelectedModelConfig();
   const modelLabel =
     config?.label ?? providerSelect.options[providerSelect.selectedIndex]?.textContent;
-  topbarTitle.textContent = modelLabel
+  const title = modelLabel
     ? `${providerLabels[providerSelect.value] ?? providerSelect.value} · ${modelLabel}`
     : "No model loaded";
+  topbarTitle.textContent = title;
+  composerHeroTitle.textContent = title;
 }
 
 // Chat history: saved sessions are plain text (a few KB each at most), so
@@ -487,7 +500,8 @@ function renderSidebarChats() {
     deleteBtn.type = "button";
     deleteBtn.className = "sidebar-chat-delete";
     deleteBtn.setAttribute("aria-label", `Delete "${session.title}"`);
-    deleteBtn.textContent = "×";
+    deleteBtn.innerHTML =
+      '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>';
     deleteBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       deleteSession(session.id);
@@ -554,6 +568,7 @@ populateModelOptions(providerSelect.value);
 syncInputMode(providerSelect.value);
 updateTopbarTitle();
 renderSidebarChats();
+updateEmptyState();
 
 function isMobileViewport() {
   return window.matchMedia("(max-width: 768px)").matches;
