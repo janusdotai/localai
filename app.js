@@ -696,9 +696,18 @@ function transformersProgressCallback(progress) {
 // freeze the tab's UI or trigger Chrome's "Page Unresponsive" prompt.
 let transformersWorker = null;
 
+// The worker script is only ever fetched from inside a click handler (Load
+// model), never during the page's initial navigation — so a hard-reload of
+// index.html does NOT force-bypass the browser's cache for it, and the
+// plain python3 -m http.server dev setup sends no cache-control headers to
+// stop the browser reusing a stale copy indefinitely. Bump this by hand
+// whenever transformers-worker.js changes so the URL actually changes and
+// forces a real re-fetch.
+const WORKER_VERSION = "2";
+
 function getTransformersWorker() {
   if (!transformersWorker) {
-    transformersWorker = new Worker("transformers-worker.js", { type: "module" });
+    transformersWorker = new Worker(`transformers-worker.js?v=${WORKER_VERSION}`, { type: "module" });
   }
   return transformersWorker;
 }
