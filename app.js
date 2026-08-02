@@ -868,11 +868,16 @@ modalConfirmBtn.addEventListener("click", async () => {
 // the model come through formatted instead of literal asterisks/backticks).
 // User messages are never touched by this — they're always set via
 // bubble.textContent elsewhere — so nothing a user types can execute as HTML.
-// marked.js doesn't sanitize its output, which normally calls for pairing it
-// with something like DOMPurify; we're accepting that here because this app
-// is 100% client-side with no server and no other users, so the realistic
-// worst case is self-XSS in your own tab from your own local model's output.
-// Add a sanitizer before reusing this pattern anywhere with shared state.
+//
+// marked.js parses markdown but does not sanitize the resulting HTML, and
+// local model output is not trustworthy input for innerHTML: a model asked
+// to "show an example HTML page" without wrapping it in a code fence — a
+// very plausible thing for a small/quantized instruct model to get wrong —
+// would inject raw markup straight into the DOM. DOMPurify strips anything
+// dangerous (script tags, event-handler attributes, javascript:/data: URIs,
+// iframes, etc.) from marked's output before it's ever assigned to
+// innerHTML. Both are needed together: marked doesn't sanitize, DOMPurify
+// doesn't parse markdown.
 let markedPromise = null;
 function getMarked() {
   if (!markedPromise) {
@@ -881,10 +886,21 @@ function getMarked() {
   return markedPromise;
 }
 
+let dompurifyPromise = null;
+function getDOMPurify() {
+  if (!dompurifyPromise) {
+    dompurifyPromise = import("https://esm.run/dompurify").then((m) => m.default);
+  }
+  return dompurifyPromise;
+}
+
 async function renderAssistantMarkdown(bubble, text) {
   try {
-    const marked = await getMarked();
-    bubble.innerHTML = marked.parse(text);
+    const [marked, DOMPurify] = await Promise.all([getMarked(), getDOMPurify()]);
+    // If either library failed to load, we land in the catch below and fall
+    // back to plain text — never to marked's unsanitized HTML. Fail-safe,
+    // not fail-open.
+    bubble.innerHTML = DOMPurify.sanitize(marked.parse(text));
   } catch (err) {
     console.error("Markdown rendering failed, showing plain text", err);
     bubble.textContent = text;
