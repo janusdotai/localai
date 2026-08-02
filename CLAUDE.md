@@ -7,7 +7,7 @@ Original goal:
 
 ## What's here
 
-A single-page, no-build-step demo — `index.html` + `app.js` + `style.css` — that runs models entirely in the browser: no backend, no API key, no data leaving the machine. A dropdown switches between four interchangeable providers/modes; three are text chat sharing one chat UI and message-history array, the fourth swaps the text input for an image upload control and does captioning instead.
+A single-page, no-build-step demo — `index.html` + `app.js` + `style.css` (+ `transformers-worker.js`, see below) — that runs models entirely in the browser: no backend, no API key, no data leaving the machine. A dropdown switches between four interchangeable providers/modes; three are text chat sharing one chat UI and message-history array, the fourth swaps the text input for an image upload control and does captioning instead.
 
 ## Providers and supported models
 
@@ -73,6 +73,14 @@ Fix: `<meta name="referrer" content="no-referrer">` in `index.html` suppresses t
 ## Known issue: Hugging Face CDN flakiness (separate from the above)
 
 Independent of the referrer block, `huggingface.co` intermittently serves a CloudFront error page instead of the real file on a plain, unblocked request (confirmed via repeated `curl` with no special headers: same URL flipping between 200 and 404 across successive requests). `withRetries()` in `app.js` retries model loads up to 3 times with backoff to smooth over this. If it still fails after that, the status line says so explicitly and suggests clicking "Load model" again.
+
+## Fixed: Transformers.js could freeze the tab ("Page Unresponsive")
+
+Root cause: `@huggingface/transformers`'s WASM backend runs inference synchronously on whatever thread calls it. Running it on the main thread (the original implementation) meant a long generation blocked all UI updates/repaints for the entire duration — Chrome's own "Page Unresponsive" dialog is just the browser's generic response to a main thread that stops processing messages, and a multi-hundred-token WASM generation was easily long enough to trigger it. WebLLM (WebGPU) wasn't affected the same way since the heavy lifting happens on the GPU asynchronously; this was specific to the Transformers.js provider (both chat and image captioning, since both use the same WASM-backed library).
+
+Fix: `transformers-worker.js` is a dedicated Web Worker that owns the actual `pipeline()` instance and does all loading/generation/captioning — the main thread only ever sends small messages (`{type: "load"|"generate"|"caption", ...}`) and receives progress/token/result messages back. `app.js`'s `transformersPipeline`/`captionerPipeline` are now just booleans (the real objects never leave the worker); `workerLoad()`/`workerGenerate()`/`workerCaption()` wrap the postMessage round-trip in a Promise so the rest of the app (`loadTransformers`, `loadCaptioner`, `streamTransformers`, the image-upload handler) barely changed. `resetEngineHandles()` terminates the worker on provider/model switch so a stale model isn't left resident in memory.
+
+Verified via CDP: while a generation was in flight, repeated trivial `Runtime.evaluate` round-trips against the page averaged ~1ms (max 4.5ms) across 76 samples — the main thread was never blocked, which is the direct, measurable fix for the freeze. Also re-verified the full provider-switch lifecycle (worker terminate → fresh worker on next load) and image captioning, both working through the worker.
 
 ## Known issue: large cached files can silently fail to persist
 

@@ -71,12 +71,15 @@ let history = [];
 
 // Active provider handle. Exactly one of these is set after a successful load.
 let webllmEngine = null;
+// transformersPipeline/captionerPipeline are just booleans here — the real
+// pipeline objects live inside transformersWorker (see below), never on the
+// main thread, so a long generation can never block this tab's UI.
 let transformersPipeline = null;
+let captionerPipeline = null;
 // "provider:modelValue" of whichever engine is actually loaded right now —
 // distinct from providerSelect/modelSelect, which just reflect the current
 // dropdown selection and can change without a new load happening.
 let loadedModelKey = null;
-let captionerPipeline = null;
 let chromeSession = null;
 
 function setStatus(text, isError = false) {
@@ -396,6 +399,7 @@ function resetEngineHandles() {
   captionerPipeline = null;
   chromeSession = null;
   loadedModelKey = null;
+  terminateTransformersWorker();
 }
 
 // Used when switching provider/model via the dropdowns: the old engine and
@@ -654,37 +658,132 @@ function transformersProgressCallback(progress) {
   }
 }
 
+// Transformers.js runs entirely inside this worker (model loading, chat
+// generation, and image captioning) rather than on the main thread. WASM
+// inference is synchronous, so running it here means a long reply can never
+// freeze the tab's UI or trigger Chrome's "Page Unresponsive" prompt.
+let transformersWorker = null;
+
+function getTransformersWorker() {
+  if (!transformersWorker) {
+    transformersWorker = new Worker("transformers-worker.js", { type: "module" });
+  }
+  return transformersWorker;
+}
+
+function terminateTransformersWorker() {
+  if (transformersWorker) {
+    transformersWorker.terminate();
+    transformersWorker = null;
+  }
+}
+
+function workerLoad(task, modelId, dtype, onProgress) {
+  const worker = getTransformersWorker();
+  return new Promise((resolve, reject) => {
+    function cleanup() {
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+    }
+    function handleMessage(e) {
+      const msg = e.data;
+      if (msg.type === "progress") {
+        onProgress(msg.progress);
+      } else if (msg.type === "loaded") {
+        cleanup();
+        resolve();
+      } else if (msg.type === "error") {
+        cleanup();
+        reject(new Error(msg.message));
+      }
+    }
+    function handleError(e) {
+      cleanup();
+      reject(new Error(e.message || "Transformers.js worker crashed"));
+    }
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({ type: "load", task, modelId, dtype });
+  });
+}
+
+function workerGenerate(conversationHistory, onToken) {
+  const worker = getTransformersWorker();
+  return new Promise((resolve, reject) => {
+    let full = "";
+    function cleanup() {
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+    }
+    function handleMessage(e) {
+      const msg = e.data;
+      if (msg.type === "token") {
+        full += msg.text;
+        onToken(full);
+      } else if (msg.type === "done") {
+        cleanup();
+        resolve(full);
+      } else if (msg.type === "error") {
+        cleanup();
+        reject(new Error(msg.message));
+      }
+    }
+    function handleError(e) {
+      cleanup();
+      reject(new Error(e.message || "Transformers.js worker crashed"));
+    }
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({ type: "generate", history: conversationHistory });
+  });
+}
+
+function workerCaption(file) {
+  const worker = getTransformersWorker();
+  return new Promise((resolve, reject) => {
+    function cleanup() {
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+    }
+    function handleMessage(e) {
+      const msg = e.data;
+      if (msg.type === "caption-result") {
+        cleanup();
+        resolve(msg.text);
+      } else if (msg.type === "error") {
+        cleanup();
+        reject(new Error(msg.message));
+      }
+    }
+    function handleError(e) {
+      cleanup();
+      reject(new Error(e.message || "Transformers.js worker crashed"));
+    }
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({ type: "caption", file });
+  });
+}
+
 async function loadTransformers() {
   setLoadProgress("Loading Transformers.js...");
-  const { pipeline } = await import(
-    "https://esm.run/@huggingface/transformers"
-  );
-
   const modelId = modelSelect.value;
   const { dtype } = getSelectedModelConfig();
-  transformersPipeline = await withRetries(() =>
-    pipeline("text-generation", modelId, {
-      ...(dtype ? { dtype } : {}),
-      progress_callback: transformersProgressCallback,
-    })
+  await withRetries(() =>
+    workerLoad("text-generation", modelId, dtype, transformersProgressCallback)
   );
+  transformersPipeline = true;
   setLoadProgress(`Loaded ${modelId}. Ready to chat.`, 100);
 }
 
 async function loadCaptioner() {
   setLoadProgress("Loading image captioning model...");
-  const { pipeline } = await import(
-    "https://esm.run/@huggingface/transformers"
-  );
-
   const modelId = modelSelect.value;
   const { dtype } = getSelectedModelConfig();
-  captionerPipeline = await withRetries(() =>
-    pipeline("image-to-text", modelId, {
-      ...(dtype ? { dtype } : {}),
-      progress_callback: transformersProgressCallback,
-    })
+  await withRetries(() =>
+    workerLoad("image-to-text", modelId, dtype, transformersProgressCallback)
   );
+  captionerPipeline = true;
   setLoadProgress(`Loaded ${modelId}. Upload an image to caption it.`, 100);
 }
 
@@ -776,27 +875,10 @@ async function streamWebLLM(bubble) {
 }
 
 async function streamTransformers(bubble) {
-  const { TextStreamer } = await import(
-    "https://esm.run/@huggingface/transformers"
-  );
-
-  let full = "";
-  const streamer = new TextStreamer(transformersPipeline.tokenizer, {
-    skip_prompt: true,
-    skip_special_tokens: true,
-    callback_function: (text) => {
-      full += text;
-      bubble.textContent = full;
-      chatEl.scrollTop = chatEl.scrollHeight;
-    },
+  return workerGenerate(history, (fullText) => {
+    bubble.textContent = fullText;
+    chatEl.scrollTop = chatEl.scrollHeight;
   });
-
-  await transformersPipeline(history, {
-    max_new_tokens: 512,
-    do_sample: false,
-    streamer,
-  });
-  return full;
 }
 
 async function streamChromeAI(bubble) {
@@ -834,8 +916,8 @@ imageInput.addEventListener("change", async () => {
   bubble.classList.add("pending");
 
   try {
-    const output = await captionerPipeline(file);
-    bubble.textContent = output[0]?.generated_text ?? "(no caption produced)";
+    const caption = await workerCaption(file);
+    bubble.textContent = caption || "(no caption produced)";
   } catch (err) {
     console.error(err);
     bubble.textContent = `Error: ${err.message ?? err}`;
