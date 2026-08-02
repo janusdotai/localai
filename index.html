@@ -8,48 +8,76 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="header-row">
-      <div>
-        <h1>Client-side LLM Chat</h1>
-        <p class="subtitle">Runs entirely in your browser — no server, no API key.</p>
-      </div>
-      <button id="settings-btn" type="button" class="settings-btn">Storage</button>
-    </header>
+  <div class="app-shell">
+    <div id="sidebar-backdrop" class="sidebar-backdrop hidden"></div>
 
-    <div class="controls">
-      <div class="control-group">
-        <label for="provider">Provider</label>
-        <select id="provider">
-          <option value="webllm">WebLLM (tiny open-weight model, WebGPU)</option>
-          <option value="transformers">Transformers.js (tiny ONNX model, WASM/WebGPU)</option>
-          <option value="caption">Transformers.js (image captioning)</option>
-          <option value="chrome">Chrome built-in Gemini Nano</option>
-        </select>
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-top">
+        <button id="new-chat-btn" type="button" class="sidebar-new-chat">+ New chat</button>
       </div>
 
-      <div class="control-group" id="model-group">
-        <label for="model" id="model-label">Model</label>
-        <select id="model"></select>
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">Chats</div>
+        <div class="sidebar-chats">
+          <div class="sidebar-chat-item active">New conversation</div>
+          <div class="sidebar-chat-item">Explaining WebGPU vs WASM</div>
+          <div class="sidebar-chat-item">Image captioning test</div>
+        </div>
       </div>
 
-      <button id="load-btn">Load model</button>
+      <div class="sidebar-bottom">
+        <div class="sidebar-section-label">Model</div>
+
+        <div class="control-group">
+          <label for="provider">Provider</label>
+          <select id="provider">
+            <option value="webllm">WebLLM (tiny open-weight model, WebGPU)</option>
+            <option value="transformers">Transformers.js (tiny ONNX model, WASM/WebGPU)</option>
+            <option value="caption">Transformers.js (image captioning)</option>
+            <option value="chrome">Chrome built-in Gemini Nano</option>
+          </select>
+        </div>
+
+        <div class="control-group" id="model-group">
+          <label for="model" id="model-label">Model</label>
+          <select id="model"></select>
+        </div>
+
+        <button id="load-btn" type="button" class="sidebar-load-btn">Load model</button>
+        <button id="settings-btn" type="button" class="settings-btn">Storage</button>
+
+        <div class="sidebar-user">Guest · Local session</div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="topbar">
+        <button id="sidebar-toggle" type="button" class="hamburger-btn" aria-label="Toggle sidebar">
+          <span class="hamburger"></span>
+        </button>
+        <div id="topbar-title" class="topbar-title">No model loaded</div>
+        <button id="topbar-new-chat" type="button" class="icon-btn" aria-label="New chat">+</button>
+      </div>
+
+      <div id="status" class="status" role="status"></div>
+
+      <div id="chat" class="chat" aria-live="polite">
+        <div id="chat-inner" class="chat-inner"></div>
+      </div>
+
+      <div class="composer">
+        <form id="chat-form" class="chat-form">
+          <div id="text-controls" class="input-mode">
+            <input id="chat-input" type="text" placeholder="Say something..." autocomplete="off" disabled />
+            <button id="send-btn" type="submit" disabled>Send</button>
+          </div>
+          <div id="image-controls" class="input-mode hidden">
+            <input id="image-input" type="file" accept="image/*" class="file-input" disabled />
+            <label id="image-label" for="image-input" class="upload-btn">Choose an image…</label>
+          </div>
+        </form>
+      </div>
     </div>
-
-    <div id="status" class="status" role="status"></div>
-
-    <div id="chat" class="chat" aria-live="polite"></div>
-
-    <form id="chat-form" class="chat-form">
-      <div id="text-controls" class="input-mode">
-        <input id="chat-input" type="text" placeholder="Say something..." autocomplete="off" disabled />
-        <button id="send-btn" type="submit" disabled>Send</button>
-      </div>
-      <div id="image-controls" class="input-mode hidden">
-        <input id="image-input" type="file" accept="image/*" class="file-input" disabled />
-        <label id="image-label" for="image-input" class="upload-btn">Choose an image…</label>
-      </div>
-    </form>
   </div>
 
   <div id="load-modal" class="modal-overlay hidden">

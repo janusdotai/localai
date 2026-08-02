@@ -30,6 +30,7 @@ const modelGroup = document.getElementById("model-group");
 const loadBtn = document.getElementById("load-btn");
 const statusEl = document.getElementById("status");
 const chatEl = document.getElementById("chat");
+const chatInner = document.getElementById("chat-inner");
 const form = document.getElementById("chat-form");
 const textControls = document.getElementById("text-controls");
 const imageControls = document.getElementById("image-controls");
@@ -54,6 +55,12 @@ const settingsStorageSummary = document.getElementById("settings-storage-summary
 const settingsList = document.getElementById("settings-list");
 const settingsCloseBtn = document.getElementById("settings-close-btn");
 const settingsClearAllBtn = document.getElementById("settings-clear-all-btn");
+const sidebar = document.getElementById("sidebar");
+const sidebarBackdrop = document.getElementById("sidebar-backdrop");
+const sidebarToggle = document.getElementById("sidebar-toggle");
+const newChatBtn = document.getElementById("new-chat-btn");
+const topbarNewChatBtn = document.getElementById("topbar-new-chat");
+const topbarTitle = document.getElementById("topbar-title");
 
 /** @type {{role: "user"|"assistant", content: string}[]} */
 let history = [];
@@ -146,6 +153,7 @@ const providerLabels = {
   webllm: "WebLLM",
   transformers: "Transformers.js",
   caption: "Transformers.js (captioning)",
+  chrome: "Chrome built-in AI",
 };
 
 function allCacheableModels() {
@@ -303,11 +311,20 @@ function setChatEnabled(enabled) {
 }
 
 function addBubble(role) {
-  const el = document.createElement("div");
-  el.className = `msg ${role}`;
-  chatEl.appendChild(el);
+  const row = document.createElement("div");
+  row.className = `msg-row ${role}`;
+
+  const avatar = document.createElement("div");
+  avatar.className = `avatar ${role}`;
+  avatar.textContent = role === "user" ? "U" : "A";
+
+  const bubble = document.createElement("div");
+  bubble.className = `msg ${role}`;
+
+  row.append(avatar, bubble);
+  chatInner.appendChild(row);
   chatEl.scrollTop = chatEl.scrollHeight;
-  return el;
+  return bubble;
 }
 
 function addImageBubble(file) {
@@ -345,15 +362,30 @@ function syncInputMode(provider) {
   imageControls.classList.toggle("hidden", !isCaption);
 }
 
+// Clears the visible conversation only — the loaded engine (if any) stays
+// loaded, so "New chat" behaves like ChatGPT's: same model, blank history.
+function clearChat() {
+  history = [];
+  chatInner.innerHTML = "";
+  imageInput.value = "";
+}
+
 function resetProviderState() {
   webllmEngine = null;
   transformersPipeline = null;
   captionerPipeline = null;
   chromeSession = null;
-  history = [];
-  chatEl.innerHTML = "";
-  imageInput.value = "";
+  clearChat();
   setChatEnabled(false);
+}
+
+function updateTopbarTitle() {
+  const config = getSelectedModelConfig();
+  const modelLabel =
+    config?.label ?? providerSelect.options[providerSelect.selectedIndex]?.textContent;
+  topbarTitle.textContent = modelLabel
+    ? `${providerLabels[providerSelect.value] ?? providerSelect.value} · ${modelLabel}`
+    : "No model loaded";
 }
 
 providerSelect.addEventListener("change", () => {
@@ -361,10 +393,42 @@ providerSelect.addEventListener("change", () => {
   syncInputMode(providerSelect.value);
   resetProviderState();
   setStatus("");
+  updateTopbarTitle();
 });
+
+modelSelect.addEventListener("change", updateTopbarTitle);
 
 populateModelOptions(providerSelect.value);
 syncInputMode(providerSelect.value);
+updateTopbarTitle();
+
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 768px)").matches;
+}
+
+function setSidebarOpen(open) {
+  sidebar.classList.toggle("collapsed", !open);
+  sidebarBackdrop.classList.toggle("hidden", !(open && isMobileViewport()));
+  localStorage.setItem("sidebarOpen", String(open));
+}
+
+function toggleSidebar() {
+  setSidebarOpen(sidebar.classList.contains("collapsed"));
+}
+
+const savedSidebarOpen = localStorage.getItem("sidebarOpen");
+setSidebarOpen(savedSidebarOpen !== null ? savedSidebarOpen === "true" : !isMobileViewport());
+
+sidebarToggle.addEventListener("click", toggleSidebar);
+sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false));
+
+function handleNewChat() {
+  clearChat();
+  if (isMobileViewport()) setSidebarOpen(false);
+}
+
+newChatBtn.addEventListener("click", handleNewChat);
+topbarNewChatBtn.addEventListener("click", handleNewChat);
 
 // Hugging Face's CDN occasionally serves a transient error page instead of
 // the real model file; browsers report that as a CORS failure since error

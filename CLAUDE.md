@@ -28,13 +28,16 @@ Other client-side options that exist but weren't built into this demo (documente
 
 ## Architecture
 
-- `index.html` — page shell: provider selector, model selector (repopulated per-provider via JS, since WebLLM/Transformers.js-chat/Transformers.js-caption model IDs are different namespaces), chat log, and two swappable input-mode rows in the form (`#text-controls` for chat, `#image-controls` — a hidden file input + styled label — for captioning), toggled by `syncInputMode()`.
-- `app.js` — plain ES module, no bundler, all libraries loaded via CDN (`esm.run`) dynamic `import()`.
-  - `providerModels` config maps each provider to its model list; each entry can carry a `dtype` (read by `getSelectedModelConfig()` and passed to `pipeline()` for the two Transformers.js providers — needed both for download-size control and to work around the captioning model's broken default quant, above).
+- `index.html` — an OpenWebUI/ChatGPT-style shell: `.app-shell` = collapsible `#sidebar` + `.main`. The sidebar holds a "+ New chat" button, a **mock** static chat-history list (`.sidebar-chat-item`s — intentionally not clickable, no handler, `cursor: default`; only the "real" controls below them do anything), and the real provider/model selectors + Load/Storage buttons (same ids as before, just relocated — see below). `.main` has a topbar (hamburger sidebar-toggle + current model name + "+" new-chat), the scrolling `#chat` (messages append into `#chat-inner`, a centered `max-width: 48rem` column — `#chat` itself just provides the scrollbar), and `.composer` (the existing `#chat-form` restyled into a rounded pill, unchanged `#text-controls`/`#image-controls` swap logic for chat vs. captioning).
+- `app.js` — plain ES module, no bundler, all libraries loaded via CDN (`esm.run`) dynamic `import()`. The restyle deliberately reused every existing element id so almost none of the functional code needed to change — only relocated in the DOM. What's new:
+  - `clearChat()` (wired to both "New chat" buttons) resets `history`/`chatInner` **without** touching the loaded engine — so, like ChatGPT, starting a new chat keeps whatever model is already loaded; `resetProviderState()` (used on provider/model switch, where the old engine really is invalid) now calls `clearChat()` plus nulls the engine handles.
+  - `addBubble()` now builds a `.msg-row` (avatar + bubble) and appends into `chatInner` instead of `chatEl` directly — still returns the bubble node, so every existing `bubble.textContent = ...` call site elsewhere is untouched.
+  - `toggleSidebar()`/`setSidebarOpen()` — width-collapse on desktop, slide-in overlay drawer with a backdrop under a 768px breakpoint; state persisted in `localStorage` (`sidebarOpen` — a legitimate use of it, unlike model weights, which never belong in localStorage).
+  - `updateTopbarTitle()` reflects the current provider+model *selection* (not load state) in the topbar; fired on provider change, model change, and once at init.
+  - `providerModels` config maps each provider to its model list; each entry can carry a `dtype` (read by `getSelectedModelConfig()` and passed to `pipeline()` for the two Transformers.js providers — needed both for download-size control and to work around the captioning model's broken default quant, below).
   - `loadWebLLM` / `loadTransformers` / `loadCaptioner` / `loadChromeAI` each populate one of four module-level engine handles (`webllmEngine`, `transformersPipeline`, `captionerPipeline`, `chromeSession`) — exactly one is live at a time.
   - `streamWebLLM` / `streamTransformers` / `streamChromeAI` stream tokens into the current assistant chat bubble as they arrive; the `imageInput` `change` handler runs the non-streaming captioning pipeline instead and renders the uploaded image via `addImageBubble()`.
-  - Shared `history` array of `{role, content}` messages feeds whichever chat provider is active (captioning doesn't use it — each image is captioned independently).
-- `style.css` — full-viewport flex layout (header/controls/status fixed height, chat log fills remaining space), responsive down to mobile widths.
+- `style.css` — flex shell (`.app-shell` → `.sidebar` + `.main`) instead of the old single centered column; sidebar collapse/drawer breakpoint at 768px (separate from the existing 480px mobile breakpoint used for finer spacing tweaks). Hamburger icon is drawn in pure CSS (`::before`/`::after` bars), not a glyph/emoji, for cross-platform consistency.
 
 ### Download UX: confirm dialog, progress modal, storage inspector
 
@@ -53,6 +56,10 @@ Fix: `<meta name="referrer" content="no-referrer">` in `index.html` suppresses t
 ## Known issue: Hugging Face CDN flakiness (separate from the above)
 
 Independent of the referrer block, `huggingface.co` intermittently serves a CloudFront error page instead of the real file on a plain, unblocked request (confirmed via repeated `curl` with no special headers: same URL flipping between 200 and 404 across successive requests). `withRetries()` in `app.js` retries model loads up to 3 times with backoff to smooth over this. If it still fails after that, the status line says so explicitly and suggests clicking "Load model" again.
+
+## Known issue: large cached files can silently fail to persist
+
+Observed via the storage inspector during regression testing after the sidebar restyle: a freshly-downloaded ~130MB SmolLM2 model showed as cached but only ~2MB in size, even though inference worked correctly (weights were fetched and used in-memory) and a second chat message worked without any re-download in the same session. Console showed the same non-fatal `Cache.put() encountered a network error` warning previously noted for the ONNX Runtime WASM binary (see Transformers.js provider row above) — this time apparently affecting the actual model weight file, not just the runtime binary. Net effect: the *session* is fine, but the *persisted* cache entry for large files may be smaller than expected, meaning a later visit could need to re-fetch more than the storage inspector's numbers would suggest. Not something this app's code controls (it's the browser's Cache API opaque-response handling for large cross-origin responses) and not reliably reproducible attempt-to-attempt, so not fixed — just documented here in case the storage inspector's numbers look inconsistent across sessions.
 
 ## Running it
 

@@ -4,6 +4,8 @@ A tiny demo of chatting with an LLM — and captioning an image — that runs **
 
 Open `index.html` (via a static server, see below), pick a provider, load the model, and chat (or upload an image, for the captioning provider).
 
+The UI follows the familiar ChatGPT/OpenWebUI layout: a collapsible left sidebar (hamburger icon or the "+ New chat"/"+ " buttons toggle it) with a "New chat" button that clears the conversation but keeps whatever model is already loaded — no re-download needed. The sidebar's chat-history list is a static mock (this demo only ever has one active conversation); the model picker, "Load model", and "Storage" controls beneath it are all real.
+
 ## The client-side LLM landscape
 
 | Approach | How it runs | Tradeoffs |
@@ -31,7 +33,7 @@ Then open `http://localhost:8000` in a recent Chrome or Edge.
 - **Transformers.js (image captioning)**: select it, click "Load model", then use "Choose an image…" to upload a photo — it's captioned on-device (no chat, just image in, caption out).
 - **Chrome built-in Gemini Nano**: select it, click "Load model". If unavailable, the status line explains why (usually the `chrome://flags/#prompt-api-for-gemini-nano` flag needs enabling).
 
-"Load model" always asks for confirmation first, naming the model and its approximate download size, before anything downloads. Click the **Storage** button (top right) any time to see which models are actually cached in your browser and how much space each one is using — models are downloaded via the browser's Cache API (not `localStorage`, not tied to your tab session), so they persist across refreshes and restarts until you clear them from that panel or clear the site's data in your browser.
+"Load model" always asks for confirmation first, naming the model and its approximate download size, before anything downloads. Click the **Storage** button in the sidebar any time to see which models are actually cached in your browser and how much space each one is using — models are downloaded via the browser's Cache API (not `localStorage`, not tied to your tab session), so they persist across refreshes and restarts until you clear them from that panel or clear the site's data in your browser.
 
 WebLLM and both Transformers.js modes download model weights from Hugging Face on first use; that CDN occasionally serves a transient error for a request (surfaces in the browser as a CORS-looking failure). The app retries automatically a few times before giving up — if it still fails, just click "Load model" again.
 
