@@ -57,6 +57,13 @@ header {
   flex: 0 0 auto;
 }
 
+.header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 header h1 {
   font-size: clamp(1.15rem, 2.5vw, 1.6rem);
   margin: 0 0 0.15rem;
@@ -66,6 +73,17 @@ header h1 {
   margin: 0;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.settings-btn {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.85rem;
+  cursor: pointer;
 }
 
 .controls {
@@ -406,6 +424,66 @@ header h1 {
   font-weight: 600;
 }
 
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-card {
+  max-width: 480px;
+  text-align: left;
+}
+
+.settings-card #modal-title,
+.settings-card h2 {
+  text-align: left;
+}
+
+.settings-card .modal-note {
+  text-align: left;
+  margin-bottom: 1rem;
+}
+
+.settings-card .modal-actions {
+  justify-content: flex-end;
+}
+
+.settings-list {
+  max-height: 45vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.settings-row-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.settings-row-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+}
+
+.settings-row-clear {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+}
+
 @media (max-width: 480px) {
   .controls {
     flex-direction: column;
@@ -426,5 +504,9 @@ header h1 {
 
   #load-btn {
     margin-left: 0;
+  }
+
+  .settings-row {
+    flex-wrap: wrap;
   }
 }

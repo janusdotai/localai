@@ -9,9 +9,12 @@
 </head>
 <body>
   <div class="app">
-    <header>
-      <h1>Client-side LLM Chat</h1>
-      <p class="subtitle">Runs entirely in your browser — no server, no API key.</p>
+    <header class="header-row">
+      <div>
+        <h1>Client-side LLM Chat</h1>
+        <p class="subtitle">Runs entirely in your browser — no server, no API key.</p>
+      </div>
+      <button id="settings-btn" type="button" class="settings-btn">Storage</button>
     </header>
 
     <div class="controls">
@@ -70,6 +73,18 @@
         <p id="modal-status" class="modal-status"></p>
         <p class="modal-note">Depending on the model and your connection, this can take a while — don't close the tab.</p>
         <button id="modal-close-btn" class="modal-close-btn hidden" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <h2 id="settings-title">Downloaded models</h2>
+      <p id="settings-storage-summary" class="modal-note"></p>
+      <div id="settings-list" class="settings-list"></div>
+      <div class="modal-actions">
+        <button id="settings-close-btn" type="button" class="btn btn-secondary">Close</button>
+        <button id="settings-clear-all-btn" type="button" class="btn btn-secondary">Clear all downloaded models</button>
       </div>
     </div>
   </div>

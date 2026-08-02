@@ -48,6 +48,12 @@ const modalProgressSection = document.getElementById("modal-progress-section");
 const modalProgressFill = document.getElementById("modal-progress-fill");
 const modalStatus = document.getElementById("modal-status");
 const modalCloseBtn = document.getElementById("modal-close-btn");
+const settingsBtn = document.getElementById("settings-btn");
+const settingsModal = document.getElementById("settings-modal");
+const settingsStorageSummary = document.getElementById("settings-storage-summary");
+const settingsList = document.getElementById("settings-list");
+const settingsCloseBtn = document.getElementById("settings-close-btn");
+const settingsClearAllBtn = document.getElementById("settings-clear-all-btn");
 
 /** @type {{role: "user"|"assistant", content: string}[]} */
 let history = [];
@@ -119,6 +125,174 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !loadModal.classList.contains("hidden")) {
     dismissModalIfCancelable();
   }
+});
+
+// Storage inspector: models are cached via the Cache API (see providerModels
+// above for which model each URL belongs to), not localStorage/sessionStorage
+// — so this reads directly from `caches` rather than tracking state ourselves.
+function formatBytes(bytes) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+const providerLabels = {
+  webllm: "WebLLM",
+  transformers: "Transformers.js",
+  caption: "Transformers.js (captioning)",
+};
+
+function allCacheableModels() {
+  return Object.entries(providerModels)
+    .filter(([provider]) => provider !== "chrome")
+    .flatMap(([provider, models]) => models.map((m) => ({ provider, ...m })));
+}
+
+// Model URLs on Hugging Face always contain the model's repo id, so matching
+// by substring works regardless of which cache name the library chose or
+// what org prefix it added — no need to hardcode cache names.
+async function findCachedEntriesFor(modelValue) {
+  const cacheNames = await caches.keys();
+  const matches = [];
+  for (const name of cacheNames) {
+    const cache = await caches.open(name);
+    for (const request of await cache.keys()) {
+      if (request.url.includes(modelValue)) {
+        matches.push({ cacheName: name, request });
+      }
+    }
+  }
+  return matches;
+}
+
+async function sizeOfEntries(entries) {
+  let total = 0;
+  for (const { cacheName, request } of entries) {
+    const cache = await caches.open(cacheName);
+    const response = await cache.match(request);
+    if (!response) continue;
+    const contentLength = response.headers.get("content-length");
+    total += contentLength
+      ? Number(contentLength)
+      : (await response.clone().blob()).size;
+  }
+  return total;
+}
+
+async function deleteCachedEntriesFor(modelValue) {
+  for (const { cacheName, request } of await findCachedEntriesFor(modelValue)) {
+    const cache = await caches.open(cacheName);
+    await cache.delete(request);
+  }
+}
+
+async function renderStorageSummary() {
+  if (!navigator.storage?.estimate) {
+    settingsStorageSummary.textContent = "";
+    return;
+  }
+  const { usage, quota } = await navigator.storage.estimate();
+  settingsStorageSummary.textContent = quota
+    ? `Using ${formatBytes(usage)} of roughly ${formatBytes(quota)} available to this site.`
+    : `Using ${formatBytes(usage)}.`;
+}
+
+async function renderSettingsList() {
+  if (!window.caches) {
+    settingsList.innerHTML =
+      '<p class="modal-note">This browser does not support the Cache API, so downloaded models can\'t be inspected here.</p>';
+    return;
+  }
+
+  settingsList.innerHTML = '<p class="modal-note">Scanning browser storage…</p>';
+
+  const rows = await Promise.all(
+    allCacheableModels().map(async (m) => {
+      const entries = await findCachedEntriesFor(m.value);
+      const size = entries.length ? await sizeOfEntries(entries) : 0;
+      return { ...m, downloaded: entries.length > 0, size };
+    })
+  );
+
+  settingsList.innerHTML = "";
+
+  for (const row of rows) {
+    const el = document.createElement("div");
+    el.className = "settings-row";
+
+    const info = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "settings-row-name";
+    name.textContent = row.label;
+    const meta = document.createElement("div");
+    meta.className = "settings-row-meta";
+    meta.textContent = row.downloaded
+      ? `${providerLabels[row.provider]} · Downloaded · ${formatBytes(row.size)}`
+      : `${providerLabels[row.provider]} · Not downloaded`;
+    info.append(name, meta);
+    el.appendChild(info);
+
+    if (row.downloaded) {
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "btn btn-secondary settings-row-clear";
+      clearBtn.textContent = "Clear";
+      clearBtn.addEventListener("click", async () => {
+        clearBtn.disabled = true;
+        clearBtn.textContent = "Clearing…";
+        await deleteCachedEntriesFor(row.value);
+        await Promise.all([renderSettingsList(), renderStorageSummary()]);
+      });
+      el.appendChild(clearBtn);
+    }
+
+    settingsList.appendChild(el);
+  }
+
+  const chromeRow = document.createElement("div");
+  chromeRow.className = "settings-row";
+  chromeRow.innerHTML =
+    '<div><div class="settings-row-name">Gemini Nano</div>' +
+    '<div class="settings-row-meta">Chrome built-in · managed by Chrome, not visible to this page</div></div>';
+  settingsList.appendChild(chromeRow);
+}
+
+function openSettingsModal() {
+  settingsModal.classList.remove("hidden");
+  renderSettingsList();
+  renderStorageSummary();
+}
+
+function closeSettingsModal() {
+  settingsModal.classList.add("hidden");
+}
+
+settingsBtn.addEventListener("click", openSettingsModal);
+settingsCloseBtn.addEventListener("click", closeSettingsModal);
+settingsModal.addEventListener("click", (e) => {
+  if (e.target === settingsModal) closeSettingsModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !settingsModal.classList.contains("hidden")) {
+    closeSettingsModal();
+  }
+});
+
+settingsClearAllBtn.addEventListener("click", async () => {
+  settingsClearAllBtn.disabled = true;
+  settingsClearAllBtn.textContent = "Clearing…";
+  for (const m of allCacheableModels()) {
+    await deleteCachedEntriesFor(m.value);
+  }
+  settingsClearAllBtn.disabled = false;
+  settingsClearAllBtn.textContent = "Clear all downloaded models";
+  await Promise.all([renderSettingsList(), renderStorageSummary()]);
 });
 
 function setChatEnabled(enabled) {
