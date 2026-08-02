@@ -4,20 +4,22 @@
 //   - "caption": image captioning via WASM/WebGPU (@huggingface/transformers)
 //   - "chrome": Chrome's built-in Gemini Nano (window.LanguageModel Prompt API)
 
+// sizeEstimate is a rough, approximate download size shown in the confirm
+// dialog before committing to a download — not measured at runtime.
 const providerModels = {
   webllm: [
-    { value: "Llama-3.2-1B-Instruct-q4f16_1-MLC", label: "Llama 3.2 1B Instruct (q4f16)" },
-    { value: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 0.5B Instruct (q4f16)" },
+    { value: "Llama-3.2-1B-Instruct-q4f16_1-MLC", label: "Llama 3.2 1B Instruct (q4f16)", sizeEstimate: "~880 MB" },
+    { value: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 0.5B Instruct (q4f16)", sizeEstimate: "~450 MB" },
   ],
   transformers: [
-    { value: "onnx-community/Qwen2.5-0.5B-Instruct", label: "Qwen 2.5 0.5B Instruct (ONNX, q4)", dtype: "q4" },
-    { value: "HuggingFaceTB/SmolLM2-135M-Instruct", label: "SmolLM2 135M Instruct (ONNX, very small/fast)" },
+    { value: "onnx-community/Qwen2.5-0.5B-Instruct", label: "Qwen 2.5 0.5B Instruct (ONNX, q4)", dtype: "q4", sizeEstimate: "~300 MB" },
+    { value: "HuggingFaceTB/SmolLM2-135M-Instruct", label: "SmolLM2 135M Instruct (ONNX, very small/fast)", sizeEstimate: "~130 MB" },
   ],
   caption: [
     // The default quantized export of this model has a broken decoder graph
     // ("Missing required scale" DequantizeLinear error) under current ONNX
     // Runtime Web — fp32 sidesteps it at the cost of a bigger download.
-    { value: "Xenova/vit-gpt2-image-captioning", label: "ViT-GPT2 Image Captioning", dtype: "fp32" },
+    { value: "Xenova/vit-gpt2-image-captioning", label: "ViT-GPT2 Image Captioning", dtype: "fp32", sizeEstimate: "~800 MB" },
   ],
   chrome: [],
 };
@@ -36,7 +38,13 @@ const sendBtn = document.getElementById("send-btn");
 const imageInput = document.getElementById("image-input");
 const imageLabel = document.getElementById("image-label");
 const loadModal = document.getElementById("load-modal");
+const modalTitle = document.getElementById("modal-title");
 const modalModelName = document.getElementById("modal-model-name");
+const modalConfirmSection = document.getElementById("modal-confirm-section");
+const modalSizeWarning = document.getElementById("modal-size-warning");
+const modalCancelBtn = document.getElementById("modal-cancel-btn");
+const modalConfirmBtn = document.getElementById("modal-confirm-btn");
+const modalProgressSection = document.getElementById("modal-progress-section");
 const modalProgressFill = document.getElementById("modal-progress-fill");
 const modalStatus = document.getElementById("modal-status");
 const modalCloseBtn = document.getElementById("modal-close-btn");
@@ -56,21 +64,39 @@ function setStatus(text, isError = false) {
 }
 
 // Downloading a model is a real commitment — tens to hundreds of MB over the
-// network — so make it obvious with a blocking full-page modal and progress
-// bar rather than a quiet status line, and let the library-reported progress
-// (0-100, or unknown/indeterminate) drive the bar.
-function showLoadModal(modelId) {
-  modalModelName.textContent = modelId;
-  modalProgressFill.classList.add("indeterminate");
-  modalProgressFill.style.width = "0%";
-  modalStatus.textContent = "Starting…";
-  modalStatus.classList.remove("error");
-  modalCloseBtn.classList.add("hidden");
-  loadModal.classList.remove("hidden");
+// network — so require an explicit yes/no confirmation naming the size before
+// anything downloads, then make progress obvious with a blocking full-page
+// modal and progress bar rather than a quiet status line.
+function isModalCancelable() {
+  return (
+    !modalConfirmSection.classList.contains("hidden") ||
+    !modalCloseBtn.classList.contains("hidden")
+  );
 }
 
 function hideLoadModal() {
   loadModal.classList.add("hidden");
+}
+
+function dismissModalIfCancelable() {
+  if (isModalCancelable()) hideLoadModal();
+}
+
+function showConfirmModal() {
+  const config = getSelectedModelConfig();
+  const modelLabel =
+    config?.label ?? providerSelect.options[providerSelect.selectedIndex].textContent;
+
+  modalTitle.textContent = "Download model?";
+  modalModelName.textContent = modelLabel;
+  modalSizeWarning.textContent =
+    providerSelect.value === "chrome"
+      ? "Chrome manages this download itself — size and progress aren't reported to this page."
+      : `Estimated download size: ${config?.sizeEstimate ?? "unknown"} (approximate).`;
+
+  modalConfirmSection.classList.remove("hidden");
+  modalProgressSection.classList.add("hidden");
+  loadModal.classList.remove("hidden");
 }
 
 function setLoadProgress(text, percent = null) {
@@ -84,7 +110,16 @@ function setLoadProgress(text, percent = null) {
   }
 }
 
+modalCancelBtn.addEventListener("click", hideLoadModal);
 modalCloseBtn.addEventListener("click", hideLoadModal);
+loadModal.addEventListener("click", (e) => {
+  if (e.target === loadModal) dismissModalIfCancelable();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !loadModal.classList.contains("hidden")) {
+    dismissModalIfCancelable();
+  }
+});
 
 function setChatEnabled(enabled) {
   input.disabled = !enabled;
@@ -283,11 +318,21 @@ const loaders = {
   chrome: loadChromeAI,
 };
 
-loadBtn.addEventListener("click", async () => {
+loadBtn.addEventListener("click", showConfirmModal);
+
+modalConfirmBtn.addEventListener("click", async () => {
+  modalTitle.textContent = "Downloading model";
+  modalConfirmSection.classList.add("hidden");
+  modalProgressSection.classList.remove("hidden");
+  modalProgressFill.classList.add("indeterminate");
+  modalProgressFill.style.width = "0%";
+  modalStatus.textContent = "Starting…";
+  modalStatus.classList.remove("error");
+  modalCloseBtn.classList.add("hidden");
+
   loadBtn.disabled = true;
   setChatEnabled(false);
   resetProviderState();
-  showLoadModal(getSelectedModelConfig()?.label ?? providerSelect.value);
   try {
     await loaders[providerSelect.value]();
     setChatEnabled(true);

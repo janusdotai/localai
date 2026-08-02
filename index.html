@@ -50,15 +50,27 @@
   </div>
 
   <div id="load-modal" class="modal-overlay hidden">
-    <div class="modal-card">
-      <h2>Downloading model</h2>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h2 id="modal-title">Download model?</h2>
       <p id="modal-model-name" class="modal-model-name"></p>
-      <div class="progress-track">
-        <div id="modal-progress-fill" class="progress-fill"></div>
+
+      <div id="modal-confirm-section">
+        <p id="modal-size-warning" class="modal-size-warning"></p>
+        <p class="modal-note">This is a one-time download. The model is cached in your browser afterward, so future loads are instant. Everything runs on-device — nothing is uploaded.</p>
+        <div class="modal-actions">
+          <button id="modal-cancel-btn" type="button" class="btn btn-secondary">Cancel</button>
+          <button id="modal-confirm-btn" type="button" class="btn btn-primary">Download</button>
+        </div>
       </div>
-      <p id="modal-status" class="modal-status"></p>
-      <p class="modal-note">Model weights are downloaded once, then cached in your browser for next time. Depending on the model and your connection, this can take a while — don't close the tab.</p>
-      <button id="modal-close-btn" class="modal-close-btn hidden" type="button">Close</button>
+
+      <div id="modal-progress-section" class="hidden">
+        <div class="progress-track">
+          <div id="modal-progress-fill" class="progress-fill"></div>
+        </div>
+        <p id="modal-status" class="modal-status"></p>
+        <p class="modal-note">Depending on the model and your connection, this can take a while — don't close the tab.</p>
+        <button id="modal-close-btn" class="modal-close-btn hidden" type="button">Close</button>
+      </div>
     </div>
   </div>
 

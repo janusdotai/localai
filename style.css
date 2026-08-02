@@ -352,6 +352,60 @@ header h1 {
   display: none;
 }
 
+#modal-confirm-section.hidden,
+#modal-progress-section.hidden {
+  display: none;
+}
+
+.modal-size-warning {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(217, 119, 6, 0.35);
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: left;
+  line-height: 1.4;
+}
+
+@media (prefers-color-scheme: dark) {
+  .modal-size-warning {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+  }
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-top: 0.25rem;
+}
+
+.btn {
+  padding: 0.55rem 1.4rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btn-secondary {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
 @media (max-width: 480px) {
   .controls {
     flex-direction: column;
