@@ -61,6 +61,8 @@ const sidebarToggle = document.getElementById("sidebar-toggle");
 const newChatBtn = document.getElementById("new-chat-btn");
 const topbarNewChatBtn = document.getElementById("topbar-new-chat");
 const topbarTitle = document.getElementById("topbar-title");
+const sidebarChatsEl = document.getElementById("sidebar-chats");
+const clearHistoryBtn = document.getElementById("clear-history-btn");
 
 /** @type {{role: "user"|"assistant", content: string}[]} */
 let history = [];
@@ -68,6 +70,10 @@ let history = [];
 // Active provider handle. Exactly one of these is set after a successful load.
 let webllmEngine = null;
 let transformersPipeline = null;
+// "provider:modelValue" of whichever engine is actually loaded right now —
+// distinct from providerSelect/modelSelect, which just reflect the current
+// dropdown selection and can change without a new load happening.
+let loadedModelKey = null;
 let captionerPipeline = null;
 let chromeSession = null;
 
@@ -364,17 +370,27 @@ function syncInputMode(provider) {
 
 // Clears the visible conversation only — the loaded engine (if any) stays
 // loaded, so "New chat" behaves like ChatGPT's: same model, blank history.
+// Also drops the current *saved* session pointer: the next successful reply
+// starts a fresh entry in the sidebar rather than overwriting the old one.
 function clearChat() {
   history = [];
   chatInner.innerHTML = "";
   imageInput.value = "";
+  currentSessionId = null;
 }
 
-function resetProviderState() {
+function resetEngineHandles() {
   webllmEngine = null;
   transformersPipeline = null;
   captionerPipeline = null;
   chromeSession = null;
+  loadedModelKey = null;
+}
+
+// Used when switching provider/model via the dropdowns: the old engine and
+// the displayed conversation are both invalid, so both get cleared.
+function resetProviderState() {
+  resetEngineHandles();
   clearChat();
   setChatEnabled(false);
 }
@@ -387,6 +403,142 @@ function updateTopbarTitle() {
     ? `${providerLabels[providerSelect.value] ?? providerSelect.value} · ${modelLabel}`
     : "No model loaded";
 }
+
+// Chat history: saved sessions are plain text (a few KB each at most), so
+// unlike model weights, localStorage is the right tool here — no need for
+// the Cache API. Only text-chat providers (webllm/transformers/chrome) get
+// saved; image captioning is a one-shot action rather than a conversation,
+// so it deliberately isn't part of `history` and isn't persisted.
+let chatSessions = [];
+try {
+  chatSessions = JSON.parse(localStorage.getItem("chatSessions") || "[]");
+} catch (err) {
+  console.error("Failed to read saved chat history", err);
+}
+let currentSessionId = null;
+
+function saveSessions() {
+  try {
+    localStorage.setItem("chatSessions", JSON.stringify(chatSessions));
+  } catch (err) {
+    console.error("Failed to save chat history", err);
+  }
+}
+
+function deriveTitle(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return "New conversation";
+  return trimmed.length > 42 ? `${trimmed.slice(0, 42)}…` : trimmed;
+}
+
+// Called after every exchange (success or failure) so the sent message is
+// never silently lost, even if the model failed to reply.
+function upsertCurrentSession() {
+  if (history.length === 0) return;
+
+  const now = Date.now();
+  const existing = chatSessions.find((s) => s.id === currentSessionId);
+
+  if (existing) {
+    existing.history = history.map((m) => ({ ...m }));
+    existing.updatedAt = now;
+  } else {
+    const firstUserMessage = history.find((m) => m.role === "user");
+    const session = {
+      id: `chat_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      title: deriveTitle(firstUserMessage?.content ?? ""),
+      provider: providerSelect.value,
+      modelValue: modelSelect.value,
+      history: history.map((m) => ({ ...m })),
+      createdAt: now,
+      updatedAt: now,
+    };
+    chatSessions.push(session);
+    currentSessionId = session.id;
+  }
+
+  saveSessions();
+  renderSidebarChats();
+}
+
+function renderSidebarChats() {
+  sidebarChatsEl.innerHTML = "";
+
+  if (chatSessions.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "sidebar-chat-empty";
+    empty.textContent = "No saved chats yet";
+    sidebarChatsEl.appendChild(empty);
+    return;
+  }
+
+  const sorted = [...chatSessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const session of sorted) {
+    const item = document.createElement("div");
+    item.className = `sidebar-chat-item${session.id === currentSessionId ? " active" : ""}`;
+    item.addEventListener("click", () => loadSession(session.id));
+
+    const title = document.createElement("span");
+    title.className = "sidebar-chat-title";
+    title.textContent = session.title;
+    item.appendChild(title);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "sidebar-chat-delete";
+    deleteBtn.setAttribute("aria-label", `Delete "${session.title}"`);
+    deleteBtn.textContent = "×";
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteSession(session.id);
+    });
+    item.appendChild(deleteBtn);
+
+    sidebarChatsEl.appendChild(item);
+  }
+}
+
+function loadSession(id) {
+  const session = chatSessions.find((s) => s.id === id);
+  if (!session) return;
+
+  currentSessionId = id;
+  history = session.history.map((m) => ({ ...m }));
+
+  providerSelect.value = session.provider;
+  populateModelOptions(session.provider);
+  syncInputMode(session.provider);
+  modelSelect.value = session.modelValue;
+  updateTopbarTitle();
+
+  chatInner.innerHTML = "";
+  for (const msg of history) {
+    addBubble(msg.role).textContent = msg.content;
+  }
+
+  const matchesLoaded = loadedModelKey === `${session.provider}:${session.modelValue}`;
+  setChatEnabled(matchesLoaded);
+  setStatus(matchesLoaded ? "" : "Load this model to continue the conversation.");
+
+  renderSidebarChats();
+  if (isMobileViewport()) setSidebarOpen(false);
+}
+
+function deleteSession(id) {
+  chatSessions = chatSessions.filter((s) => s.id !== id);
+  saveSessions();
+  if (id === currentSessionId) clearChat();
+  renderSidebarChats();
+}
+
+function clearAllSessions() {
+  chatSessions = [];
+  saveSessions();
+  clearChat();
+  renderSidebarChats();
+}
+
+clearHistoryBtn.addEventListener("click", clearAllSessions);
 
 providerSelect.addEventListener("change", () => {
   populateModelOptions(providerSelect.value);
@@ -401,6 +553,7 @@ modelSelect.addEventListener("change", updateTopbarTitle);
 populateModelOptions(providerSelect.value);
 syncInputMode(providerSelect.value);
 updateTopbarTitle();
+renderSidebarChats();
 
 function isMobileViewport() {
   return window.matchMedia("(max-width: 768px)").matches;
@@ -570,9 +723,13 @@ modalConfirmBtn.addEventListener("click", async () => {
 
   loadBtn.disabled = true;
   setChatEnabled(false);
-  resetProviderState();
+  // Only the engine handles reset here, not the chat display — clicking
+  // "Load model" to continue a restored session (see loadSession()) must
+  // not wipe the conversation that's already on screen.
+  resetEngineHandles();
   try {
     await loaders[providerSelect.value]();
+    loadedModelKey = `${providerSelect.value}:${modelSelect.value}`;
     setChatEnabled(true);
     setTimeout(hideLoadModal, 500);
   } catch (err) {
@@ -699,5 +856,6 @@ form.addEventListener("submit", async (e) => {
     bubble.classList.remove("pending");
     setChatEnabled(true);
     input.focus();
+    upsertCurrentSession();
   }
 });

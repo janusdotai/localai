@@ -4,7 +4,7 @@ A tiny demo of chatting with an LLM — and captioning an image — that runs **
 
 Open `index.html` (via a static server, see below), pick a provider, load the model, and chat (or upload an image, for the captioning provider).
 
-The UI follows the familiar ChatGPT/OpenWebUI layout: a collapsible left sidebar (hamburger icon or the "+ New chat"/"+ " buttons toggle it) with a "New chat" button that clears the conversation but keeps whatever model is already loaded — no re-download needed. The sidebar's chat-history list is a static mock (this demo only ever has one active conversation); the model picker, "Load model", and "Storage" controls beneath it are all real.
+The UI follows the familiar ChatGPT/OpenWebUI layout: a collapsible left sidebar (hamburger icon, or the "+ New chat"/"+" buttons, toggle it) with a real, persisted chat history. Every text conversation (WebLLM, Transformers.js chat, or Chrome's Gemini Nano) is saved to your browser's `localStorage` as you go, titled from your first message, and listed in the sidebar — click one to reload it (you may need to click "Load model" again first if you've since switched models, but your conversation will still be there once it's loaded). Hover a chat for a **×** to delete it, or use **Clear all** above the list to wipe everything. "New chat" clears the visible conversation but keeps whatever model is already loaded — no re-download needed. Image captioning isn't a multi-turn conversation, so it isn't saved to history.
 
 ## The client-side LLM landscape
 
