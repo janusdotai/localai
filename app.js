@@ -531,7 +531,12 @@ function loadSession(id) {
 
   chatInner.innerHTML = "";
   for (const msg of history) {
-    addBubble(msg.role).textContent = msg.content;
+    const bubble = addBubble(msg.role);
+    if (msg.role === "assistant") {
+      renderAssistantMarkdown(bubble, msg.content);
+    } else {
+      bubble.textContent = msg.content;
+    }
   }
 
   const matchesLoaded = loadedModelKey === `${session.provider}:${session.modelValue}`;
@@ -859,6 +864,33 @@ modalConfirmBtn.addEventListener("click", async () => {
   }
 });
 
+// Assistant replies are rendered as markdown (lists, code, bold, etc. from
+// the model come through formatted instead of literal asterisks/backticks).
+// User messages are never touched by this — they're always set via
+// bubble.textContent elsewhere — so nothing a user types can execute as HTML.
+// marked.js doesn't sanitize its output, which normally calls for pairing it
+// with something like DOMPurify; we're accepting that here because this app
+// is 100% client-side with no server and no other users, so the realistic
+// worst case is self-XSS in your own tab from your own local model's output.
+// Add a sanitizer before reusing this pattern anywhere with shared state.
+let markedPromise = null;
+function getMarked() {
+  if (!markedPromise) {
+    markedPromise = import("https://esm.run/marked").then((m) => m.marked);
+  }
+  return markedPromise;
+}
+
+async function renderAssistantMarkdown(bubble, text) {
+  try {
+    const marked = await getMarked();
+    bubble.innerHTML = marked.parse(text);
+  } catch (err) {
+    console.error("Markdown rendering failed, showing plain text", err);
+    bubble.textContent = text;
+  }
+}
+
 async function streamWebLLM(bubble) {
   const chunks = await webllmEngine.chat.completions.create({
     messages: history,
@@ -868,7 +900,7 @@ async function streamWebLLM(bubble) {
   for await (const chunk of chunks) {
     const delta = chunk.choices[0]?.delta?.content ?? "";
     full += delta;
-    bubble.textContent = full;
+    await renderAssistantMarkdown(bubble, full);
     chatEl.scrollTop = chatEl.scrollHeight;
   }
   return full;
@@ -876,7 +908,7 @@ async function streamWebLLM(bubble) {
 
 async function streamTransformers(bubble) {
   return workerGenerate(history, (fullText) => {
-    bubble.textContent = fullText;
+    renderAssistantMarkdown(bubble, fullText);
     chatEl.scrollTop = chatEl.scrollHeight;
   });
 }
@@ -892,7 +924,7 @@ async function streamChromeAI(bubble) {
     } else {
       full += chunk;
     }
-    bubble.textContent = full;
+    await renderAssistantMarkdown(bubble, full);
     chatEl.scrollTop = chatEl.scrollHeight;
   }
   return full;
