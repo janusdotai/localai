@@ -49,6 +49,20 @@ const providerModels = {
     { value: "HuggingFaceTB/SmolVLM-256M-Instruct", label: "SmolVLM 256M Instruct (image Q&A, smallest)", dtype: "q4", sizeEstimate: "~265 MB" },
   ],
   chrome: [],
+  // Not a selectable provider in the #provider dropdown — voice input is
+  // orthogonal to which chat provider is active, so this only exists as a
+  // config home (reused by allCacheableModels() for the storage inspector,
+  // same as every other entry above) and isn't ever assigned to modelSelect.
+  asr: [
+    // Same broken-default-quantized-graph issue as the vit-gpt2 captioning
+    // model above ("Missing required scale" DequantizeLinear error) —
+    // dtype: "fp32" sidesteps it. Confirmed via direct testing: the default
+    // dtype throws on session creation, fp32 loads (~5-7s) and transcribes
+    // correctly. sizeEstimate is the real onnx/ file sizes from HF (encoder
+    // 32.9MB + decoder 118.4MB), not a guess — quantized would be ~41MB but
+    // is unusable.
+    { value: "Xenova/whisper-tiny.en", label: "Whisper Tiny English (speech-to-text)", dtype: "fp32", sizeEstimate: "~150 MB" },
+  ],
 };
 
 const providerSelect = document.getElementById("provider");
@@ -68,6 +82,7 @@ const imageInput = document.getElementById("image-input");
 const imageLabel = document.getElementById("image-label");
 const vqaImageInput = document.getElementById("vqa-image-input");
 const vqaAttachLabel = document.getElementById("vqa-attach-label");
+const micBtn = document.getElementById("mic-btn");
 const loadModal = document.getElementById("load-modal");
 const modalTitle = document.getElementById("modal-title");
 const modalModelName = document.getElementById("modal-model-name");
@@ -127,6 +142,21 @@ let vqaImage = null;
 /** @type {{role: "user"|"assistant", content: string}[]} */
 let vqaMessages = [];
 
+// Voice input state. asrLoaded is deliberately separate from loadedModelKey
+// — the ASR pipeline's own dedicated worker (asrWorker) is independent of
+// whichever chat provider is currently loaded, so it must survive provider
+// switches and must never be touched by resetEngineHandles(). pendingLoadKind
+// tells the shared confirm/progress modal (showConfirmModal(), the
+// modalConfirmBtn handler) which of the two unrelated things it's currently
+// downloading: a chat-provider model, or the voice-input model.
+let asrWorker = null;
+let asrLoaded = false;
+let isRecording = false;
+let mediaRecorder = null;
+let micStream = null;
+let recordedChunks = [];
+let pendingLoadKind = "provider";
+
 // Provider-specific "stop generating" hook, set by each stream*() function
 // right before it starts and cleared once it finishes — there's only ever
 // one generation in flight at a time. userStoppedGeneration distinguishes a
@@ -177,15 +207,16 @@ function dismissModalIfCancelable() {
   if (isModalCancelable()) hideLoadModal();
 }
 
-function showConfirmModal() {
-  const config = getSelectedModelConfig();
+function showConfirmModal(kind = "provider") {
+  pendingLoadKind = kind;
+  const config = kind === "asr" ? getAsrModelConfig() : getSelectedModelConfig();
   const modelLabel =
     config?.label ?? providerSelect.options[providerSelect.selectedIndex].textContent;
 
   modalTitle.textContent = "Download model?";
   modalModelName.textContent = modelLabel;
   modalSizeWarning.textContent =
-    providerSelect.value === "chrome"
+    kind !== "asr" && providerSelect.value === "chrome"
       ? "Chrome manages this download itself — size and progress aren't reported to this page."
       : `Estimated download size: ${config?.sizeEstimate ?? "unknown"} (approximate).`;
 
@@ -248,6 +279,7 @@ const providerLabels = {
   caption: "Transformers.js (captioning)",
   vqa: "Transformers.js (image Q&A)",
   chrome: "Chrome built-in AI",
+  asr: "Voice input (Whisper)",
 };
 
 function allCacheableModels() {
@@ -515,11 +547,18 @@ function getSelectedModelConfig() {
   );
 }
 
+function getAsrModelConfig() {
+  return providerModels.asr[0];
+}
+
 function syncInputMode(provider) {
   const isCaption = provider === "caption";
   textControls.classList.toggle("hidden", isCaption);
   imageControls.classList.toggle("hidden", !isCaption);
   vqaAttachLabel.classList.toggle("hidden", provider !== "vqa");
+  // Mic button shows wherever there's a free-text input to fill — every
+  // provider except captioning, which has no text input at all.
+  micBtn.classList.toggle("hidden", isCaption);
   input.placeholder =
     provider === "vqa" ? "Attach an image to start…" : "Say something...";
 }
@@ -960,6 +999,111 @@ function workerCaption(file) {
   });
 }
 
+// Voice input runs in its own dedicated worker (asr-worker.js), not
+// transformersWorker above — that one holds exactly one loaded pipeline at a
+// time and is torn down on every chat-provider switch (resetEngineHandles()),
+// which would be wrong here: voice input must keep working (and stay loaded)
+// regardless of which chat provider is currently selected, including WebLLM,
+// which doesn't use transformersWorker at all. Same cache-busting convention
+// as WORKER_VERSION above — bump whenever asr-worker.js changes.
+const ASR_WORKER_VERSION = "2";
+
+function getAsrWorker() {
+  if (!asrWorker) {
+    asrWorker = new Worker(`asr-worker.js?v=${ASR_WORKER_VERSION}`, { type: "module" });
+  }
+  return asrWorker;
+}
+
+function asrWorkerLoad(modelId, dtype, onProgress) {
+  const worker = getAsrWorker();
+  return new Promise((resolve, reject) => {
+    function cleanup() {
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+    }
+    function handleMessage(e) {
+      const msg = e.data;
+      if (msg.type === "progress") {
+        onProgress(msg.progress);
+      } else if (msg.type === "loaded") {
+        cleanup();
+        resolve();
+      } else if (msg.type === "error") {
+        cleanup();
+        reject(new Error(msg.message));
+      }
+    }
+    function handleError(e) {
+      cleanup();
+      reject(new Error(e.message || "Voice input worker crashed"));
+    }
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({ type: "load", modelId, dtype });
+  });
+}
+
+// Whisper's audio decoding needs AudioContext, which doesn't exist inside a
+// Worker (confirmed via direct testing: passing a URL for the ASR worker to
+// fetch+decode itself throws "AudioContext is not available in your
+// environment") — so decoding has to happen here, on the main thread, before
+// handing the result to the worker. read_audio() does the decode+resample to
+// 16kHz in one step; the pipeline itself accepts the resulting Float32Array
+// directly (confirmed — unlike a raw Blob, which it rejects).
+async function decodeAudioBlob(blob) {
+  const { read_audio } = await import("https://esm.run/@huggingface/transformers");
+  const url = URL.createObjectURL(blob);
+  try {
+    return await read_audio(url, 16000);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function asrWorkerTranscribe(audioData) {
+  const worker = getAsrWorker();
+  return new Promise((resolve, reject) => {
+    function cleanup() {
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+    }
+    function handleMessage(e) {
+      const msg = e.data;
+      if (msg.type === "transcript") {
+        cleanup();
+        resolve(msg.text);
+      } else if (msg.type === "error") {
+        cleanup();
+        reject(new Error(msg.message));
+      }
+    }
+    function handleError(e) {
+      cleanup();
+      reject(new Error(e.message || "Voice input worker crashed"));
+    }
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({ type: "transcribe", audioData });
+  });
+}
+
+function asrProgressCallback(progress) {
+  if (progress.status === "progress") {
+    const pct = Math.round(progress.progress ?? 0);
+    setLoadProgress(`Downloading ${progress.file} (${pct}%)...`, pct);
+  } else {
+    setLoadProgress(`${progress.status}...`);
+  }
+}
+
+async function loadAsrModel() {
+  const { value: modelId, dtype } = getAsrModelConfig();
+  setLoadProgress("Loading voice input model...");
+  await withRetries(() => asrWorkerLoad(modelId, dtype, asrProgressCallback));
+  setLoadProgress(`Loaded ${modelId}. Ready to transcribe.`, 100);
+}
+
 async function loadTransformersTask(task, loadingMessage, readyMessage, messageType = "load", device = undefined) {
   setLoadProgress(loadingMessage);
   const modelId = modelSelect.value;
@@ -1049,8 +1193,12 @@ const loaders = {
   chrome: loadChromeAI,
 };
 
-loadBtn.addEventListener("click", showConfirmModal);
-composerHeroLoadBtn.addEventListener("click", showConfirmModal);
+// showConfirmModal() now takes an optional kind param ("provider" | "asr") —
+// these two listeners used to pass it directly, but a DOM click handler's
+// first argument is the click Event, not undefined, so that would have
+// silently overridden the "provider" default. Wrap them instead.
+loadBtn.addEventListener("click", () => showConfirmModal());
+composerHeroLoadBtn.addEventListener("click", () => showConfirmModal());
 
 modalConfirmBtn.addEventListener("click", async () => {
   modalTitle.textContent = "Downloading model";
@@ -1062,11 +1210,40 @@ modalConfirmBtn.addEventListener("click", async () => {
   modalStatus.classList.remove("error");
   modalCloseBtn.classList.add("hidden");
 
+  if (pendingLoadKind === "asr") {
+    micBtn.disabled = true;
+    try {
+      await loadAsrModel();
+      asrLoaded = true;
+      setTimeout(() => {
+        hideLoadModal();
+        // The user clicked the mic wanting to talk, not to watch a download
+        // finish — start listening immediately rather than making them
+        // click a second time for the one thing they asked for.
+        startRecording();
+      }, 500);
+    } catch (err) {
+      console.error(err);
+      const message = err.message ?? String(err);
+      setStatus(message, true);
+      modalStatus.textContent = message;
+      modalStatus.classList.add("error");
+      modalProgressFill.classList.remove("indeterminate");
+      modalCloseBtn.classList.remove("hidden");
+    } finally {
+      micBtn.disabled = false;
+    }
+    return;
+  }
+
   loadBtn.disabled = true;
   setChatEnabled(false);
   // Only the engine handles reset here, not the chat display — clicking
   // "Load model" to continue a restored session (see loadSession()) must
-  // not wipe the conversation that's already on screen.
+  // not wipe the conversation that's already on screen. Also deliberately
+  // does not touch asrWorker/asrLoaded — voice input's lifecycle is
+  // independent of the chat-provider selection (see the note by
+  // ASR_WORKER_VERSION above).
   resetEngineHandles();
   try {
     await loaders[providerSelect.value]();
@@ -1240,6 +1417,88 @@ imageInput.addEventListener("change", async () => {
     setChatEnabled(true);
   }
 });
+
+// Voice input. The mic's own enabled state is intentionally NOT wired into
+// setChatEnabled() — transcribing speech into the text box doesn't require a
+// chat engine to be loaded at all, only the (independent) ASR model. It's
+// only briefly disabled for the duration of its own load/transcribe calls,
+// to prevent double-clicks.
+function setMicRecordingUI(recording) {
+  micBtn.classList.toggle("recording", recording);
+  micBtn.setAttribute("aria-label", recording ? "Stop recording" : "Start voice input");
+}
+
+async function startRecording() {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    setStatus("Voice input isn't supported in this browser.", true);
+    return;
+  }
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    setStatus(
+      err.name === "NotAllowedError"
+        ? "Microphone access was denied. Allow microphone access in your browser settings to use voice input."
+        : `Couldn't access the microphone: ${err.message ?? err}`,
+      true
+    );
+    return;
+  }
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(micStream);
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop = handleRecordingStopped;
+  mediaRecorder.start();
+  isRecording = true;
+  setMicRecordingUI(true);
+  setStatus("Listening…");
+}
+
+function stopRecording() {
+  mediaRecorder?.stop(); // triggers onstop -> handleRecordingStopped
+  micStream?.getTracks().forEach((t) => t.stop()); // release the mic/tab indicator
+  isRecording = false;
+  setMicRecordingUI(false);
+}
+
+async function handleRecordingStopped() {
+  const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+  recordedChunks = [];
+  if (blob.size === 0) {
+    setStatus("No audio captured — try again.", true);
+    return;
+  }
+  setStatus("Transcribing…");
+  micBtn.disabled = true;
+  try {
+    const audioData = await decodeAudioBlob(blob);
+    const text = await asrWorkerTranscribe(audioData);
+    // Fills the input for the user to review/edit and send themselves —
+    // never auto-submitted (no form.requestSubmit()/.submit() call here).
+    input.value = text.trim();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    setStatus("");
+  } catch (err) {
+    console.error(err);
+    setStatus(`Transcription failed: ${err.message ?? err}`, true);
+  } finally {
+    micBtn.disabled = false;
+  }
+}
+
+async function handleMicClick() {
+  if (!asrLoaded) {
+    showConfirmModal("asr");
+    return;
+  }
+  if (isRecording) stopRecording();
+  else await startRecording();
+}
+
+micBtn.addEventListener("click", handleMicClick);
 
 // Attaching an image in VQA mode doesn't generate anything by itself — it
 // just starts (or restarts) the image conversation and unlocks the text
