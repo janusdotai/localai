@@ -11,10 +11,26 @@ const providerModels = {
   webllm: [
     { value: "Llama-3.2-1B-Instruct-q4f16_1-MLC", label: "Llama 3.2 1B Instruct (q4f16)", sizeEstimate: "~880 MB" },
     { value: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 0.5B Instruct (q4f16)", sizeEstimate: "~450 MB" },
+    // The four below were checked against the live prebuiltAppConfig.model_list
+    // this app actually loads (CreateMLCEngine resolves modelId against that
+    // list, so an unlisted id fails outright) — confirmed present, and
+    // sizeEstimate is that config's real vram_required_MB, not a guess.
+    { value: "SmolLM2-360M-Instruct-q4f16_1-MLC", label: "SmolLM2 360M Instruct (q4f16)", sizeEstimate: "~376 MB" },
+    { value: "Qwen3-0.6B-q4f16_1-MLC", label: "Qwen 3 0.6B (q4f16)", sizeEstimate: "~1.4 GB" },
+    { value: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 1.5B Instruct (q4f16)", sizeEstimate: "~1.6 GB" },
+    // f32-activation build for GPUs that lack the shader-f16 feature the
+    // q4f16 entries above require (some Android GPUs) — same weights as the
+    // Llama entry above, just a variant that doesn't need shader-f16.
+    { value: "Llama-3.2-1B-Instruct-q4f32_1-MLC", label: "Llama 3.2 1B Instruct (q4f32, no shader-f16 needed)", sizeEstimate: "~1.13 GB" },
   ],
   transformers: [
     { value: "onnx-community/Qwen2.5-0.5B-Instruct", label: "Qwen 2.5 0.5B Instruct (ONNX, q4)", dtype: "q4", sizeEstimate: "~300 MB" },
     { value: "HuggingFaceTB/SmolLM2-135M-Instruct", label: "SmolLM2 135M Instruct (ONNX, very small/fast)", sizeEstimate: "~130 MB" },
+    // Confirmed end-to-end (load + real generation) via headless Chromium's
+    // WASM path. sizeEstimate is the real onnx/model_q4.onnx_data size from
+    // HF, not a guess (a candidate estimate of ~230MB floating around
+    // elsewhere was wrong — the real q4 weights are ~388MB).
+    { value: "HuggingFaceTB/SmolLM2-360M-Instruct", label: "SmolLM2 360M Instruct (ONNX, q4)", dtype: "q4", sizeEstimate: "~390 MB" },
   ],
   caption: [
     // The default quantized export of this model has a broken decoder graph
@@ -24,6 +40,13 @@ const providerModels = {
   ],
   vqa: [
     { value: "HuggingFaceTB/SmolVLM-500M-Instruct", label: "SmolVLM 500M Instruct (image Q&A)", dtype: "q4", sizeEstimate: "~340 MB" },
+    // Same family/architecture as the 500M model above (just the smaller
+    // variant), confirmed the processor+model construct without throwing at
+    // this dtype — the failure mode that's actually bitten this app before
+    // (broken quantized graphs, unsupported ops). Not verified beyond that:
+    // an actual image Q&A exchange on real hardware, the way the 500M model
+    // above was verified, still hasn't been done for this one.
+    { value: "HuggingFaceTB/SmolVLM-256M-Instruct", label: "SmolVLM 256M Instruct (image Q&A, smallest)", dtype: "q4", sizeEstimate: "~265 MB" },
   ],
   chrome: [],
 };
