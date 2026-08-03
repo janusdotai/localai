@@ -551,14 +551,24 @@ function getAsrModelConfig() {
   return providerModels.asr[0];
 }
 
+// Mic button shows wherever there's a free-text input to fill — every
+// provider except captioning, which has no text input at all. Also hidden
+// on mobile: transcription was too slow to be usable there in practice
+// (reported directly, not a hypothetical — likely mobile CPU being too slow
+// for Whisper's WASM path), so there's no point offering it. Kept separate
+// from syncInputMode() (rather than folded into it) so a viewport resize can
+// resync just this without also resetting input.placeholder, which would
+// clobber "Ask about this image..." if a VQA image is already attached.
+function updateMicVisibility(provider) {
+  micBtn.classList.toggle("hidden", provider === "caption" || isMobileViewport());
+}
+
 function syncInputMode(provider) {
   const isCaption = provider === "caption";
   textControls.classList.toggle("hidden", isCaption);
   imageControls.classList.toggle("hidden", !isCaption);
   vqaAttachLabel.classList.toggle("hidden", provider !== "vqa");
-  // Mic button shows wherever there's a free-text input to fill — every
-  // provider except captioning, which has no text input at all.
-  micBtn.classList.toggle("hidden", isCaption);
+  updateMicVisibility(provider);
   input.placeholder =
     provider === "vqa" ? "Attach an image to start…" : "Say something...";
 }
@@ -795,7 +805,11 @@ sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false));
 // Crossing the 768px breakpoint after load (e.g. resizing the window, or
 // DevTools' device toolbar without a hard reload) leaves the CSS-driven
 // sidebar overlay and the JS-driven backdrop out of sync unless resynced.
-window.addEventListener("resize", () => setSidebarOpen(!sidebar.classList.contains("collapsed")));
+// Same resync need applies to the mic button's mobile-hidden state.
+window.addEventListener("resize", () => {
+  setSidebarOpen(!sidebar.classList.contains("collapsed"));
+  updateMicVisibility(providerSelect.value);
+});
 
 function handleNewChat() {
   clearChat();
