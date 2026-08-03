@@ -332,7 +332,9 @@ body {
 .control-group select {
   width: 100%;
   min-width: 0;
-  font-size: 0.85rem;
+  /* iOS Safari auto-zooms the whole page on focus if a form control's
+     computed font-size is under 16px — this is the minimum that avoids it. */
+  font-size: 16px;
   padding: 0.45rem 0.55rem;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -654,7 +656,8 @@ body {
   border: none;
   background: transparent;
   color: var(--fg);
-  font-size: 0.95rem;
+  /* Same iOS Safari auto-zoom-on-focus threshold as .control-group select. */
+  font-size: 16px;
   outline: none;
 }
 
