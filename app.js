@@ -181,6 +181,19 @@ function formatBytes(bytes) {
   return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+// WebGPU support on mobile is inconsistent across browsers/configurations
+// (confirmed failing on iOS Safari even after excluding it from Lockdown
+// Mode's JIT restriction, which otherwise fixed Transformers.js's WASM path).
+// Default mobile page loads to the WASM-only Transformers.js + SmolLM2 combo
+// instead of WebLLM's WebGPU-only Llama model — small enough to run
+// acceptably on WASM alone, so it doesn't need WebGPU at all. Only applies
+// to the initial dropdown selection on a fresh load; explicit choices (a
+// provider/model switch, or restoring a saved session) always win.
+const mobileDefaultModel = {
+  provider: "transformers",
+  modelValue: "HuggingFaceTB/SmolLM2-135M-Instruct",
+};
+
 const providerLabels = {
   webllm: "WebLLM",
   transformers: "Transformers.js",
@@ -664,7 +677,9 @@ providerSelect.addEventListener("change", () => {
 
 modelSelect.addEventListener("change", updateTopbarTitle);
 
+if (isMobileViewport()) providerSelect.value = mobileDefaultModel.provider;
 populateModelOptions(providerSelect.value);
+if (isMobileViewport()) modelSelect.value = mobileDefaultModel.modelValue;
 syncInputMode(providerSelect.value);
 updateTopbarTitle();
 renderSidebarChats();
