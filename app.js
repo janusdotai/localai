@@ -680,6 +680,11 @@ setSidebarOpen(savedSidebarOpen !== null ? savedSidebarOpen === "true" : !isMobi
 sidebarToggle.addEventListener("click", toggleSidebar);
 sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false));
 
+// Crossing the 768px breakpoint after load (e.g. resizing the window, or
+// DevTools' device toolbar without a hard reload) leaves the CSS-driven
+// sidebar overlay and the JS-driven backdrop out of sync unless resynced.
+window.addEventListener("resize", () => setSidebarOpen(!sidebar.classList.contains("collapsed")));
+
 function handleNewChat() {
   clearChat();
   if (isMobileViewport()) setSidebarOpen(false);
