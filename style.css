@@ -578,6 +578,14 @@ body {
   font-weight: 600;
 }
 
+.composer-hero-load-btn {
+  margin-top: 0.15rem;
+}
+
+.composer-hero-load-btn.hidden {
+  display: none;
+}
+
 .chat-form {
   max-width: 48rem;
   margin: 0 auto;

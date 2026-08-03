@@ -75,6 +75,7 @@ const newChatBtn = document.getElementById("new-chat-btn");
 const topbarTitle = document.getElementById("topbar-title");
 const mainEl = document.querySelector(".main");
 const composerHeroTitle = document.getElementById("composer-hero-title");
+const composerHeroLoadBtn = document.getElementById("composer-hero-load-btn");
 const sidebarChatsEl = document.getElementById("sidebar-chats");
 const clearHistoryBtn = document.getElementById("clear-history-btn");
 
@@ -388,6 +389,15 @@ function setChatEnabled(enabled) {
   imageInput.disabled = !enabled;
   imageLabel.classList.toggle("disabled", !enabled);
   vqaImageInput.disabled = !enabled;
+  // The empty-state hero shows the *selected* model's name regardless of
+  // whether it's actually loaded, so a greyed-out, unexplained input is the
+  // only other cue — easy to miss, especially on mobile where the sidebar's
+  // "Load model" button starts off-screen. Surface the same action here,
+  // recomputed from loadedModelKey (not the `enabled` param) so it stays
+  // correct even in the VQA case where enabled=true but vqaReady=false.
+  const modelIsLoaded =
+    loadedModelKey === `${providerSelect.value}:${modelSelect.value}`;
+  composerHeroLoadBtn.classList.toggle("hidden", modelIsLoaded);
 }
 
 // Before any messages exist, the composer floats centered in the pane
@@ -954,6 +964,7 @@ const loaders = {
 };
 
 loadBtn.addEventListener("click", showConfirmModal);
+composerHeroLoadBtn.addEventListener("click", showConfirmModal);
 
 modalConfirmBtn.addEventListener("click", async () => {
   modalTitle.textContent = "Downloading model";
