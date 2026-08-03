@@ -63,6 +63,7 @@ const textControls = document.getElementById("text-controls");
 const imageControls = document.getElementById("image-controls");
 const input = document.getElementById("chat-input");
 const sendBtn = document.getElementById("send-btn");
+const stopBtn = document.getElementById("stop-btn");
 const imageInput = document.getElementById("image-input");
 const imageLabel = document.getElementById("image-label");
 const vqaImageInput = document.getElementById("vqa-image-input");
@@ -125,6 +126,32 @@ let chromeSession = null;
 let vqaImage = null;
 /** @type {{role: "user"|"assistant", content: string}[]} */
 let vqaMessages = [];
+
+// Provider-specific "stop generating" hook, set by each stream*() function
+// right before it starts and cleared once it finishes — there's only ever
+// one generation in flight at a time. userStoppedGeneration distinguishes a
+// user-requested stop from a real mid-generation failure, since WebLLM and
+// Chrome's Prompt API both surface an interruption as a thrown/rejected
+// error rather than a clean early return.
+let activeStop = null;
+let userStoppedGeneration = false;
+
+function beginGenerating() {
+  userStoppedGeneration = false;
+  sendBtn.classList.add("hidden");
+  stopBtn.classList.remove("hidden");
+}
+
+function endGenerating() {
+  activeStop = null;
+  sendBtn.classList.remove("hidden");
+  stopBtn.classList.add("hidden");
+}
+
+stopBtn.addEventListener("click", () => {
+  userStoppedGeneration = true;
+  activeStop?.();
+});
 
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
@@ -807,7 +834,7 @@ let transformersWorker = null;
 // stop the browser reusing a stale copy indefinitely. Bump this by hand
 // whenever transformers-worker.js changes so the URL actually changes and
 // forces a real re-fetch.
-const WORKER_VERSION = "2";
+const WORKER_VERSION = "3";
 
 function getTransformersWorker() {
   if (!transformersWorker) {
@@ -821,6 +848,27 @@ function terminateTransformersWorker() {
     transformersWorker.terminate();
     transformersWorker = null;
   }
+}
+
+// Set for the duration of a workerGenerate() call so hardStopWorkerGeneration
+// can settle its promise early — Worker.terminate() doesn't fire any event on
+// the main thread, so without this the promise would otherwise just hang.
+let pendingWorkerGeneration = null;
+
+// Stopping a Transformers.js/VQA generation in progress needs the worker
+// killed outright (see the note in transformers-worker.js on why a graceful
+// postMessage-based interrupt doesn't work here) — which also means the
+// loaded model is gone and has to be reloaded before the next message.
+// loadedModelKey is cleared for exactly that reason: it's the same signal
+// loadSession() already uses to show "load this model to continue."
+function hardStopWorkerGeneration() {
+  const full = pendingWorkerGeneration?.full ?? "";
+  const resolve = pendingWorkerGeneration?.resolve;
+  pendingWorkerGeneration = null;
+  terminateTransformersWorker();
+  loadedModelKey = null;
+  setStatus("Stopped. Load the model again to continue chatting.");
+  resolve?.(full);
 }
 
 function workerLoad(task, modelId, dtype, onProgress, messageType = "load", device = undefined) {
@@ -855,19 +903,21 @@ function workerLoad(task, modelId, dtype, onProgress, messageType = "load", devi
 function workerGenerate(conversationHistory, onToken, messageType = "generate") {
   const worker = getTransformersWorker();
   return new Promise((resolve, reject) => {
-    let full = "";
+    const state = { full: "", resolve };
+    pendingWorkerGeneration = state;
     function cleanup() {
       worker.removeEventListener("message", handleMessage);
       worker.removeEventListener("error", handleError);
+      pendingWorkerGeneration = null;
     }
     function handleMessage(e) {
       const msg = e.data;
       if (msg.type === "token") {
-        full += msg.text;
-        onToken(full);
+        state.full += msg.text;
+        onToken(state.full);
       } else if (msg.type === "done") {
         cleanup();
-        resolve(full);
+        resolve(state.full);
       } else if (msg.type === "error") {
         cleanup();
         reject(new Error(msg.message));
@@ -1080,21 +1130,31 @@ async function renderAssistantMarkdown(bubble, text) {
 }
 
 async function streamWebLLM(bubble) {
-  const chunks = await webllmEngine.chat.completions.create({
-    messages: history,
-    stream: true,
-  });
+  activeStop = () => webllmEngine.interruptGenerate();
   let full = "";
-  for await (const chunk of chunks) {
-    const delta = chunk.choices[0]?.delta?.content ?? "";
-    full += delta;
-    await renderAssistantMarkdown(bubble, full);
-    chatEl.scrollTop = chatEl.scrollHeight;
+  try {
+    const chunks = await webllmEngine.chat.completions.create({
+      messages: history,
+      stream: true,
+    });
+    for await (const chunk of chunks) {
+      const delta = chunk.choices[0]?.delta?.content ?? "";
+      full += delta;
+      await renderAssistantMarkdown(bubble, full);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+  } catch (err) {
+    // interruptGenerate() can surface as a rejection depending on exactly
+    // when it lands relative to the current chunk — a user-requested stop
+    // isn't a real failure, so return what streamed so far instead of
+    // showing an error bubble.
+    if (!userStoppedGeneration) throw err;
   }
   return full;
 }
 
 async function streamTransformers(bubble) {
+  activeStop = hardStopWorkerGeneration;
   return workerGenerate(history, (fullText) => {
     renderAssistantMarkdown(bubble, fullText);
     chatEl.scrollTop = chatEl.scrollHeight;
@@ -1114,6 +1174,7 @@ function buildVqaPayload() {
 }
 
 async function streamVqa(bubble) {
+  activeStop = hardStopWorkerGeneration;
   return workerGenerate(
     buildVqaPayload(),
     (fullText) => {
@@ -1125,18 +1186,26 @@ async function streamVqa(bubble) {
 }
 
 async function streamChromeAI(bubble) {
+  const controller = new AbortController();
+  activeStop = () => controller.abort();
   const lastUserMessage = history[history.length - 1].content;
-  const stream = chromeSession.promptStreaming(lastUserMessage);
   let full = "";
-  for await (const chunk of stream) {
-    // Some Chrome versions yield cumulative text, others yield deltas.
-    if (chunk.startsWith(full)) {
-      full = chunk;
-    } else {
-      full += chunk;
+  try {
+    const stream = chromeSession.promptStreaming(lastUserMessage, { signal: controller.signal });
+    for await (const chunk of stream) {
+      // Some Chrome versions yield cumulative text, others yield deltas.
+      if (chunk.startsWith(full)) {
+        full = chunk;
+      } else {
+        full += chunk;
+      }
+      await renderAssistantMarkdown(bubble, full);
+      chatEl.scrollTop = chatEl.scrollHeight;
     }
-    await renderAssistantMarkdown(bubble, full);
-    chatEl.scrollTop = chatEl.scrollHeight;
+  } catch (err) {
+    // AbortError from the signal firing — the for-await loop throws it
+    // rather than just ending, per Chrome's documented Prompt API behavior.
+    if (!userStoppedGeneration) throw err;
   }
   return full;
 }
@@ -1207,6 +1276,7 @@ form.addEventListener("submit", async (e) => {
   const bubble = addBubble("assistant");
   bubble.classList.add("pending");
 
+  beginGenerating();
   try {
     const reply = await streamers[providerSelect.value](bubble);
     targetHistory.push({ role: "assistant", content: reply });
@@ -1215,8 +1285,14 @@ form.addEventListener("submit", async (e) => {
     bubble.textContent = `Error: ${err.message ?? err}`;
     setStatus(err.message ?? String(err), true);
   } finally {
+    endGenerating();
     bubble.classList.remove("pending");
-    setChatEnabled(true);
+    // Not unconditionally true: stopping a Transformers.js/VQA generation
+    // terminates its worker (see hardStopWorkerGeneration), which clears
+    // loadedModelKey — re-deriving from it here (the same source of truth
+    // clearChat()/loadSession() already use) correctly leaves the input
+    // disabled in that case instead of re-enabling it for a dead engine.
+    setChatEnabled(loadedModelKey === `${providerSelect.value}:${modelSelect.value}`);
     input.focus();
     // VQA sessions include an in-memory image and aren't persisted to
     // localStorage — see the note on `vqaImage`/`vqaMessages` above.

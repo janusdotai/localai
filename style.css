@@ -661,7 +661,8 @@ body {
   outline: none;
 }
 
-#send-btn {
+#send-btn,
+#stop-btn {
   flex: 0 0 auto;
   width: 36px;
   height: 36px;
@@ -675,9 +676,15 @@ body {
   justify-content: center;
 }
 
-#send-btn .icon {
+#send-btn .icon,
+#stop-btn .icon {
   width: 18px;
   height: 18px;
+}
+
+#send-btn.hidden,
+#stop-btn.hidden {
+  display: none;
 }
 
 #send-btn:disabled,

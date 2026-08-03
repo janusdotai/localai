@@ -16,6 +16,17 @@ let pipelineInstance = null;
 let vqaProcessor = null;
 let vqaModel = null;
 
+// A "stop generating" button was tried here first via generate()'s
+// stopping_criteria option (InterruptableStoppingCriteria) triggered by a
+// postMessage from the main thread — confirmed via direct testing that the
+// interrupt mechanism itself works instantly once it runs, but the postMessage
+// carrying it sat unprocessed for ~80 seconds (out of ~90s total) during a
+// real generation: this worker's event loop never yields back to the message
+// queue during the WASM generation loop until it's nearly done anyway, making
+// it useless for its actual purpose. Stopping generation on this provider is
+// instead done from app.js via Worker.terminate() — a lower-level primitive
+// that doesn't need the worker's cooperation at all.
+
 self.onmessage = async (e) => {
   const msg = e.data;
   try {
