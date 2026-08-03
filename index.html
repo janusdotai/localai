@@ -62,8 +62,8 @@
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /></svg>
         </button>
         <div id="topbar-title" class="topbar-title">No model loaded</div>
-        <button id="topbar-new-chat" type="button" class="icon-btn" aria-label="New chat">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" /></svg>
+        <button id="topbar-settings-btn" type="button" class="icon-btn" aria-label="Settings">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
         </button>
       </div>
 
@@ -136,6 +136,45 @@
       <div class="modal-actions">
         <button id="settings-close-btn" type="button" class="btn btn-secondary">Close</button>
         <button id="settings-clear-all-btn" type="button" class="btn btn-secondary">Clear all downloaded models</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="menu-modal" class="modal-overlay hidden">
+    <div class="modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+      <h2 id="menu-title">Settings</h2>
+      <div class="menu-list">
+        <button id="menu-storage-btn" type="button" class="menu-link">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" /></svg>
+          <span>Storage</span>
+        </button>
+        <button id="menu-about-btn" type="button" class="menu-link">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>
+          <span>About</span>
+        </button>
+      </div>
+      <div class="modal-actions">
+        <button id="menu-close-btn" type="button" class="btn btn-secondary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="about-modal" class="modal-overlay hidden">
+    <div class="modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="about-title">
+      <h2 id="about-title">About this app</h2>
+      <p class="modal-note">
+        This is a demo of client-side (in-browser) AI chat. Every model — text chat, image captioning, and image
+        Q&amp;A — runs entirely on your device using WebGPU or WebAssembly. There is no backend server, no API key,
+        and no account.
+      </p>
+      <p class="modal-note">
+        Model weights download once from Hugging Face or MLC's CDN and are cached in your browser (the Cache API) for
+        instant reuse afterward. Chat history is saved only in this browser's local storage. Nothing you type, and
+        no image you attach, is ever uploaded anywhere — inference happens on your own CPU/GPU, so it keeps working
+        even offline once a model is loaded.
+      </p>
+      <div class="modal-actions">
+        <button id="about-close-btn" type="button" class="btn btn-secondary">Close</button>
       </div>
     </div>
   </div>

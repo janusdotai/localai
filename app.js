@@ -61,11 +61,17 @@ const settingsStorageSummary = document.getElementById("settings-storage-summary
 const settingsList = document.getElementById("settings-list");
 const settingsCloseBtn = document.getElementById("settings-close-btn");
 const settingsClearAllBtn = document.getElementById("settings-clear-all-btn");
+const topbarSettingsBtn = document.getElementById("topbar-settings-btn");
+const menuModal = document.getElementById("menu-modal");
+const menuStorageBtn = document.getElementById("menu-storage-btn");
+const menuAboutBtn = document.getElementById("menu-about-btn");
+const menuCloseBtn = document.getElementById("menu-close-btn");
+const aboutModal = document.getElementById("about-modal");
+const aboutCloseBtn = document.getElementById("about-close-btn");
 const sidebar = document.getElementById("sidebar");
 const sidebarBackdrop = document.getElementById("sidebar-backdrop");
 const sidebarToggle = document.getElementById("sidebar-toggle");
 const newChatBtn = document.getElementById("new-chat-btn");
-const topbarNewChatBtn = document.getElementById("topbar-new-chat");
 const topbarTitle = document.getElementById("topbar-title");
 const mainEl = document.querySelector(".main");
 const composerHeroTitle = document.getElementById("composer-hero-title");
@@ -327,6 +333,50 @@ settingsClearAllBtn.addEventListener("click", async () => {
   settingsClearAllBtn.disabled = false;
   settingsClearAllBtn.textContent = "Clear all downloaded models";
   await Promise.all([renderSettingsList(), renderStorageSummary()]);
+});
+
+// The gear icon opens a small "links" modal (Storage / About) rather than a
+// dropdown, matching the same modal-overlay pattern used everywhere else.
+function openMenuModal() {
+  menuModal.classList.remove("hidden");
+}
+
+function closeMenuModal() {
+  menuModal.classList.add("hidden");
+}
+
+function openAboutModal() {
+  aboutModal.classList.remove("hidden");
+}
+
+function closeAboutModal() {
+  aboutModal.classList.add("hidden");
+}
+
+topbarSettingsBtn.addEventListener("click", openMenuModal);
+menuCloseBtn.addEventListener("click", closeMenuModal);
+menuModal.addEventListener("click", (e) => {
+  if (e.target === menuModal) closeMenuModal();
+});
+
+menuStorageBtn.addEventListener("click", () => {
+  closeMenuModal();
+  openSettingsModal();
+});
+menuAboutBtn.addEventListener("click", () => {
+  closeMenuModal();
+  openAboutModal();
+});
+
+aboutCloseBtn.addEventListener("click", closeAboutModal);
+aboutModal.addEventListener("click", (e) => {
+  if (e.target === aboutModal) closeAboutModal();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!aboutModal.classList.contains("hidden")) closeAboutModal();
+  else if (!menuModal.classList.contains("hidden")) closeMenuModal();
 });
 
 function setChatEnabled(enabled) {
@@ -636,7 +686,6 @@ function handleNewChat() {
 }
 
 newChatBtn.addEventListener("click", handleNewChat);
-topbarNewChatBtn.addEventListener("click", handleNewChat);
 
 // Hugging Face's CDN occasionally serves a transient error page instead of
 // the real model file; browsers report that as a CORS failure since error

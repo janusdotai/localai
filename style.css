@@ -856,6 +856,32 @@ body {
   justify-content: flex-end;
 }
 
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+.menu-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.6rem 0.65rem;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.menu-link:hover {
+  background: var(--bubble-assistant);
+}
+
 .settings-list {
   max-height: 45vh;
   overflow-y: auto;
