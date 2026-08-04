@@ -1003,18 +1003,6 @@ body {
    to green/amber/red so support status reads at a glance, without needing to
    parse the ✓/✗ text. Only rows with real pass/fail meaning get a class;
    purely informational rows (CPU cores, device memory) stay neutral. */
-.settings-row.status-ok {
-  border-color: var(--ok);
-}
-
-.settings-row.status-warn {
-  border-color: var(--warn);
-}
-
-.settings-row.status-bad {
-  border-color: var(--bad);
-}
-
 .settings-row.status-ok .settings-row-meta {
   color: var(--ok);
 }
