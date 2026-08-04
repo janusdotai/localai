@@ -751,6 +751,8 @@ body {
 .modal-card {
   width: 100%;
   max-width: 420px;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
   background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -972,6 +974,17 @@ body {
   flex: 0 0 auto;
   padding: 0.4rem 0.9rem;
   font-size: 0.82rem;
+}
+
+/* The capabilities modal has two .settings-list blocks in one card (device
+   info + provider support) — giving each its own 45vh scroll region nests
+   two independently-scrollable areas inside a modal, which is cramped and
+   fights touch scrolling on mobile. Let them flow as plain content instead,
+   so the single .modal-card scroll (above) handles any overflow as one unit. */
+#capabilities-list,
+#capabilities-providers {
+  max-height: none;
+  overflow-y: visible;
 }
 
 @media (max-width: 480px) {

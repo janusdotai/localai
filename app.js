@@ -104,9 +104,15 @@ const topbarSettingsBtn = document.getElementById("topbar-settings-btn");
 const menuModal = document.getElementById("menu-modal");
 const menuStorageBtn = document.getElementById("menu-storage-btn");
 const menuAboutBtn = document.getElementById("menu-about-btn");
+const menuCapabilitiesBtn = document.getElementById("menu-capabilities-btn");
 const menuCloseBtn = document.getElementById("menu-close-btn");
 const aboutModal = document.getElementById("about-modal");
 const aboutCloseBtn = document.getElementById("about-close-btn");
+const capabilitiesModal = document.getElementById("capabilities-modal");
+const capabilitiesSummary = document.getElementById("capabilities-summary");
+const capabilitiesList = document.getElementById("capabilities-list");
+const capabilitiesProviders = document.getElementById("capabilities-providers");
+const capabilitiesCloseBtn = document.getElementById("capabilities-close-btn");
 const sidebar = document.getElementById("sidebar");
 const sidebarBackdrop = document.getElementById("sidebar-backdrop");
 const sidebarToggle = document.getElementById("sidebar-toggle");
@@ -429,8 +435,145 @@ settingsClearAllBtn.addEventListener("click", async () => {
   await Promise.all([renderSettingsList(), renderStorageSummary()]);
 });
 
-// The gear icon opens a small "links" modal (Storage / About) rather than a
-// dropdown, matching the same modal-overlay pattern used everywhere else.
+// Gathers everything the "Capabilities" panel shows in one pass, so both the
+// raw device-info rows and the per-provider support rows are derived from a
+// single set of API calls rather than re-querying navigator.gpu/LanguageModel
+// twice. Read-only — this doesn't load or touch any provider.
+async function computeCapabilities() {
+  const webgpu = { supported: !!navigator.gpu, description: null };
+  if (webgpu.supported) {
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      const info = adapter?.info ?? (await adapter?.requestAdapterInfo?.());
+      const parts = [info?.vendor, info?.architecture, info?.description].filter(Boolean);
+      webgpu.description = parts.length
+        ? parts.join(" · ")
+        : adapter
+          ? "Available (details not exposed by this browser)"
+          : "Adapter request failed";
+    } catch {
+      webgpu.description = "Available (details not exposed by this browser)";
+    }
+  }
+
+  // WebGPU adapter info is often deliberately withheld (anti-fingerprinting),
+  // so fall back to the classic WebGL "unmasked renderer" string, which many
+  // browsers still expose and which frequently names the actual GPU model.
+  let glRenderer = null;
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+    const ext = gl?.getExtension("WEBGL_debug_renderer_info");
+    glRenderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null;
+  } catch {
+    glRenderer = null;
+  }
+
+  const LanguageModel = self.LanguageModel ?? self.ai?.languageModel;
+  const geminiNano = { supported: !!LanguageModel, availability: null };
+  if (LanguageModel) {
+    try {
+      geminiNano.availability = (await LanguageModel.availability?.()) ?? "available";
+    } catch {
+      geminiNano.availability = "unavailable";
+    }
+  }
+
+  const storage = navigator.storage?.estimate
+    ? await navigator.storage.estimate()
+    : null;
+
+  return {
+    webgpu,
+    glRenderer,
+    cpuCores: navigator.hardwareConcurrency ?? null,
+    deviceMemory: navigator.deviceMemory ?? null,
+    wasm: typeof WebAssembly !== "undefined",
+    geminiNano,
+    storage,
+  };
+}
+
+function providerSupport(caps) {
+  const geminiOk = caps.geminiNano.supported && caps.geminiNano.availability !== "unavailable";
+  return {
+    webllm: { ok: caps.webgpu.supported, reason: caps.webgpu.supported ? "Supported" : "Requires WebGPU" },
+    transformers: { ok: caps.wasm, reason: "Supported (WebGPU if available, WASM otherwise)" },
+    caption: { ok: caps.wasm, reason: "Supported (WebGPU if available, WASM otherwise)" },
+    vqa: { ok: caps.webgpu.supported, reason: caps.webgpu.supported ? "Supported (requires WebGPU)" : "Requires WebGPU" },
+    chrome: { ok: geminiOk, reason: geminiOk ? `Available (${caps.geminiNano.availability})` : "Not available" },
+  };
+}
+
+function capabilityRow(name, meta) {
+  const el = document.createElement("div");
+  el.className = "settings-row";
+  const info = document.createElement("div");
+  const nameEl = document.createElement("div");
+  nameEl.className = "settings-row-name";
+  nameEl.textContent = name;
+  const metaEl = document.createElement("div");
+  metaEl.className = "settings-row-meta";
+  metaEl.textContent = meta;
+  info.append(nameEl, metaEl);
+  el.appendChild(info);
+  return el;
+}
+
+async function renderCapabilities() {
+  capabilitiesSummary.textContent = "Checking this browser/device...";
+  capabilitiesList.innerHTML = "";
+  capabilitiesProviders.innerHTML = "";
+
+  const caps = await computeCapabilities();
+  capabilitiesSummary.textContent =
+    "Everything below is detected locally in this browser — nothing is sent anywhere.";
+
+  const gpuMeta = caps.webgpu.supported
+    ? caps.webgpu.description
+    : caps.glRenderer
+      ? `Not available (WebGL reports: ${caps.glRenderer})`
+      : "Not available in this browser";
+  capabilitiesList.appendChild(capabilityRow("WebGPU", gpuMeta));
+  if (caps.webgpu.supported && caps.glRenderer) {
+    capabilitiesList.appendChild(capabilityRow("GPU (WebGL renderer)", caps.glRenderer));
+  }
+  capabilitiesList.appendChild(
+    capabilityRow("CPU cores", caps.cpuCores ? String(caps.cpuCores) : "Not reported by this browser")
+  );
+  capabilitiesList.appendChild(
+    capabilityRow(
+      "Device memory",
+      caps.deviceMemory ? `~${caps.deviceMemory} GB (approx, Chrome/Edge-only API)` : "Not reported by this browser"
+    )
+  );
+  capabilitiesList.appendChild(capabilityRow("WebAssembly", caps.wasm ? "Supported" : "Not supported"));
+  capabilitiesList.appendChild(
+    capabilityRow(
+      "Gemini Nano (Chrome built-in AI)",
+      caps.geminiNano.supported ? `Availability: ${caps.geminiNano.availability}` : "Not supported in this browser"
+    )
+  );
+  capabilitiesList.appendChild(
+    capabilityRow(
+      "Storage quota",
+      caps.storage?.quota
+        ? `Using ${formatBytes(caps.storage.usage)} of roughly ${formatBytes(caps.storage.quota)} available`
+        : "Not reported by this browser"
+    )
+  );
+
+  const support = providerSupport(caps);
+  for (const [provider, { ok, reason }] of Object.entries(support)) {
+    capabilitiesProviders.appendChild(
+      capabilityRow(providerLabels[provider], `${ok ? "✓" : "✗"} ${reason}`)
+    );
+  }
+}
+
+// The gear icon opens a small "links" modal (Storage / About / Capabilities)
+// rather than a dropdown, matching the same modal-overlay pattern used
+// everywhere else.
 function openMenuModal() {
   menuModal.classList.remove("hidden");
 }
@@ -447,6 +590,15 @@ function closeAboutModal() {
   aboutModal.classList.add("hidden");
 }
 
+function openCapabilitiesModal() {
+  capabilitiesModal.classList.remove("hidden");
+  renderCapabilities();
+}
+
+function closeCapabilitiesModal() {
+  capabilitiesModal.classList.add("hidden");
+}
+
 topbarSettingsBtn.addEventListener("click", openMenuModal);
 menuCloseBtn.addEventListener("click", closeMenuModal);
 menuModal.addEventListener("click", (e) => {
@@ -461,15 +613,25 @@ menuAboutBtn.addEventListener("click", () => {
   closeMenuModal();
   openAboutModal();
 });
+menuCapabilitiesBtn.addEventListener("click", () => {
+  closeMenuModal();
+  openCapabilitiesModal();
+});
 
 aboutCloseBtn.addEventListener("click", closeAboutModal);
 aboutModal.addEventListener("click", (e) => {
   if (e.target === aboutModal) closeAboutModal();
 });
 
+capabilitiesCloseBtn.addEventListener("click", closeCapabilitiesModal);
+capabilitiesModal.addEventListener("click", (e) => {
+  if (e.target === capabilitiesModal) closeCapabilitiesModal();
+});
+
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!aboutModal.classList.contains("hidden")) closeAboutModal();
+  else if (!capabilitiesModal.classList.contains("hidden")) closeCapabilitiesModal();
   else if (!menuModal.classList.contains("hidden")) closeMenuModal();
 });
 

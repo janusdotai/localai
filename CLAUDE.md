@@ -9,6 +9,17 @@ Original goal:
 
 A single-page, no-build-step demo — `index.html` + `app.js` + `style.css` (+ `transformers-worker.js`, see below) — that runs models entirely in the browser: no backend, no API key, no data leaving the machine. A dropdown switches between five interchangeable providers/modes: three are text chat sharing one chat UI and message-history array, one swaps the text input for an image upload control and does one-shot captioning, and one (`vqa`) is a real multi-turn "chat about an image" mode.
 
+## The client-side LLM landscape
+
+| Approach | How it runs | Tradeoffs |
+| --- | --- | --- |
+| **WebLLM** (`@mlc-ai/web-llm`) — used here | Open-weight quantized models (Llama 3.2 1B, Qwen 2.5 0.5B, etc.) compiled to run via **WebGPU**, streamed from a CDN and cached by the browser after first load | Real, swappable models; needs a WebGPU browser (Chrome/Edge, and increasingly others) and a several-hundred-MB download on first use |
+| **Transformers.js** (`@huggingface/transformers`) — used here | Open-weight models run as **ONNX** via ONNX Runtime — WebGPU when available, WASM (pure CPU) otherwise | Broadest browser compatibility (works even without WebGPU); ONNX Runtime doesn't ship model weights with the CDN bundle, so first load still fetches from Hugging Face — WASM inference is noticeably slower than WebGPU |
+| **Chrome built-in AI (Gemini Nano)** — used here | Ships inside Chrome itself, exposed via the origin-trial **Prompt API** (`LanguageModel.create()`) | Zero download, fastest to start; Chrome-only, requires enabling `chrome://flags/#prompt-api-for-gemini-nano` (or an origin trial token), and the model itself isn't user-chosen |
+| wllama | llama.cpp compiled to WASM, runs GGUF models | Good for llama.cpp-family models client-side; WASM-only means slower than WebGPU-backed WebLLM |
+
+This demo implements the first three for text chat, plus two more vision modes using Transformers.js: one-shot **image captioning** and a real multi-turn **image Q&A** chat — covering both ends of the text tradeoff curve (bring-your-own model over WebGPU vs. WASM vs. zero-download built-in) and showing the same runtime handles more than just chat, with no build step required.
+
 ## Providers and supported models
 
 | Provider | Library | Runtime | Model | Notes |
@@ -21,7 +32,7 @@ A single-page, no-build-step demo — `index.html` + `app.js` + `style.css` (+ `
 | Transformers.js (image Q&A, `vqa`) | `@huggingface/transformers` | **WebGPU required** (see below) | `HuggingFaceTB/SmolVLM-500M-Instruct` (`dtype: "q4"`, ~340MB) | multi-turn — attach an image once, then ask follow-up questions about it; see "VQA / chat-about-an-image mode" below for the non-obvious implementation details |
 | Chrome built-in AI | Prompt API (`LanguageModel`) | ships inside Chrome | Gemini Nano | zero download; fixed model, not user-selectable; needs `chrome://flags/#prompt-api-for-gemini-nano` or an origin trial |
 
-Other client-side options that exist but weren't built into this demo (documented in `README.md`): wllama (llama.cpp compiled to WASM, runs GGUF models).
+Other client-side options that exist but weren't built into this demo: wllama (llama.cpp compiled to WASM, runs GGUF models — see the landscape table above).
 
 ### Known issue: this model's default quantized export is broken
 
@@ -53,6 +64,18 @@ Clicking "Load model" doesn't download anything by itself — it opens a confirm
 A second, independent modal (`#settings-modal`, opened via the "Storage" button in the header) is a storage inspector: it lists every model in `providerModels` (except Chrome's, which downloads outside this page's visibility) and, for each, scans `caches` (the Cache API — not `localStorage`/`sessionStorage`) for entries whose URL contains that model's id, reporting downloaded/not-downloaded and real size (`Content-Length` header, falling back to reading the blob if absent). `navigator.storage.estimate()` supplies the overall usage/quota line. Per-model and bulk "Clear" buttons call `cache.delete()` on just the matching entries — confirmed via CDP testing that a fresh profile shows everything as "Not downloaded", downloading a model makes it show up with an accurate size, and Clear removes it again.
 
 Both modals share the `.modal-overlay`/`.modal-card` styling and the same dismiss pattern: backdrop click and Escape close them when in a cancelable state (`isModalCancelable()` for the load modal — confirm step or post-error, never mid-download).
+
+### Device capabilities panel
+
+A third link in the gear-icon `#menu-modal` ("Capabilities", alongside "Storage" and "About") opens `#capabilities-modal`, populated by `renderCapabilities()` in `app.js`. This is mostly new *visibility* into checks the app already makes internally rather than new detection logic: `loadWebLLM()`/`loadVqa()` already gate on `navigator.gpu` (app.js, "WebGPU is not available..." errors) and `loadChromeAI()` already checks `LanguageModel.availability()` — `computeCapabilities()` runs the same checks proactively, before any load attempt, so the panel can tell the user *why* a provider will or won't work here without having to click "Load model" and hit an error first.
+
+Detected: WebGPU support (`navigator.gpu.requestAdapter()`, reading `adapter.info`), CPU core count (`navigator.hardwareConcurrency`), approximate device memory (`navigator.deviceMemory` — Chrome/Edge only), WebAssembly support, Gemini Nano availability (same `LanguageModel.availability()` call `loadChromeAI()` uses), and storage quota (reusing the same `navigator.storage.estimate()` call as the storage inspector). `providerSupport()` then derives a per-provider ✓/✗ row from those same results (`webllm`/`vqa` require WebGPU; `transformers`/`caption` work either way; `chrome` requires Gemini Nano's availability to not be `"unavailable"`).
+
+**Why two separate GPU checks**: `adapter.info` (WebGPU) is frequently withheld or vague by design — GPU model strings are a fingerprinting vector, so browsers commonly return something like an empty object or just a generic description rather than the real GPU name. The classic WebGL `WEBGL_debug_renderer_info` extension's "unmasked renderer" string is a separate, older API that many browsers still expose more readily and often does name the real GPU model — so it's shown as a supplementary row (only surfaces when WebGPU already reported it can't offer detail beyond what the WebGPU adapter info already gave).
+
+Shares the `.settings-list`/`.settings-row` styling with the storage inspector, and the modal-overlay/backdrop/Escape dismiss pattern with every other modal in this app.
+
+**Mobile bug fixed during implementation**: this is the first modal with two `.settings-list` blocks in one card (device info + provider support). Each list kept the storage inspector's existing `max-height: 45vh` + its own scrollbar, and `.modal-card` itself had no height cap — so on a short/mobile viewport the two lists became cramped, independently-scrolling regions (bad for touch scrolling), and if combined content was tall enough the whole card could clip off-screen with nothing to scroll it back into view. Fixed by giving `.modal-card` itself `max-height: calc(100vh - 2rem)` + `overflow-y: auto` (a safety net for every modal, not just this one), and overriding `#capabilities-list`/`#capabilities-providers` to `max-height: none` so they flow as plain content and the single outer card scroll handles overflow — one scroll region instead of two nested ones. The storage inspector's own `.settings-list` (a single list) keeps its original 45vh internal scroll unchanged. Verified via Playwright on an iPhone 13 viewport: card fits/scrolls as one unit, no clipping, no nested scrollbars.
 
 ### Chat history persistence
 
@@ -127,10 +150,23 @@ Observed via the storage inspector during regression testing after the sidebar r
 
 ## Running it
 
-WebGPU and ES module imports require serving over `http(s)://`, not opened as a `file://` URL:
+WebGPU and ES module imports require the page to be served over `http(s)://`, not opened directly as a `file://` URL. From this directory:
 
 ```sh
 python3 -m http.server 8000
+# or: npx serve .
 ```
 
 Then open `http://localhost:8000` in a recent Chrome or Edge.
+
+- **WebLLM**: select it, pick a model, click "Load model". First load downloads and compiles the model (progress shown), then it's cached for next time.
+- **Transformers.js**: select it, pick a model (SmolLM2 135M is fastest to try first — no WebGPU required), click "Load model". Also cached after first load.
+- **Transformers.js (image captioning)**: select it, click "Load model", then use "Choose an image…" to upload a photo — it's captioned on-device (no chat, just image in, caption out).
+- **Transformers.js (image Q&A)**: a real conversation about an image, not just a caption — select it, click "Load model" (requires WebGPU; pure CPU is impractically slow for this one), then use the small attach-image icon next to the message box to upload a photo. Once attached, ask anything about it, and keep asking follow-up questions — the image stays in context for the rest of that conversation. Not saved to the sidebar's chat history (it holds an in-memory image, unlike ordinary text chats).
+- **Chrome built-in Gemini Nano**: select it, click "Load model". If unavailable, the status line explains why (usually the `chrome://flags/#prompt-api-for-gemini-nano` flag needs enabling).
+
+"Load model" always asks for confirmation first, naming the model and its approximate download size, before anything downloads. Click the **Storage** button in the sidebar any time to see which models are actually cached in your browser and how much space each one is using — models are downloaded via the browser's Cache API (not `localStorage`, not tied to your tab session), so they persist across refreshes and restarts until you clear them from that panel or clear the site's data in your browser.
+
+WebLLM and both Transformers.js modes download model weights from Hugging Face on first use; that CDN occasionally serves a transient error for a request (surfaces in the browser as a CORS-looking failure). The app retries automatically a few times before giving up — if it still fails, just click "Load model" again.
+
+If you deploy this to a `*.workers.dev` subdomain: Hugging Face's CDN blocks requests whose `Referer` is a `workers.dev` domain (likely anti-scraping protection), which made model downloads fail every time on that hosting. `index.html` already includes `<meta name="referrer" content="no-referrer">` to work around it — no action needed, but worth knowing if you fork this and see it fail consistently only when deployed (and not locally).
