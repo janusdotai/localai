@@ -980,11 +980,45 @@ body {
    info + provider support) — giving each its own 45vh scroll region nests
    two independently-scrollable areas inside a modal, which is cramped and
    fights touch scrolling on mobile. Let them flow as plain content instead,
-   so the single .modal-card scroll (above) handles any overflow as one unit. */
+   so the single .modal-card scroll (above) handles any overflow as one unit.
+   They're also laid out as a grid rather than the Storage modal's single
+   stacked column — with ~12 short rows, one column reads as a tall, cramped
+   wall; tiling them sideways uses the extra width from .capabilities-card
+   below instead of forcing the user to scroll through every row vertically. */
 #capabilities-list,
 #capabilities-providers {
   max-height: none;
   overflow-y: visible;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+
+/* Rows carrying a long value (the WebGPU adapter string, the WebGL unmasked
+   renderer string) span every column instead of tiling — at grid-item width
+   those wrap into a tall, awkward sliver next to much shorter rows. */
+.settings-row--wide {
+  grid-column: 1 / -1;
+}
+
+#capabilities-list .settings-row-name,
+#capabilities-providers .settings-row-name {
+  font-size: 0.82rem;
+}
+
+#capabilities-list .settings-row-meta,
+#capabilities-providers .settings-row-meta {
+  font-size: 0.74rem;
+}
+
+.capabilities-card {
+  max-width: 46rem;
+}
+
+@media (max-width: 640px) {
+  #capabilities-list,
+  #capabilities-providers {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 480px) {

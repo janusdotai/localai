@@ -505,9 +505,9 @@ function providerSupport(caps) {
   };
 }
 
-function capabilityRow(name, meta) {
+function capabilityRow(name, meta, { wide = false } = {}) {
   const el = document.createElement("div");
-  el.className = "settings-row";
+  el.className = wide ? "settings-row settings-row--wide" : "settings-row";
   const info = document.createElement("div");
   const nameEl = document.createElement("div");
   nameEl.className = "settings-row-name";
@@ -534,9 +534,9 @@ async function renderCapabilities() {
     : caps.glRenderer
       ? `Not available (WebGL reports: ${caps.glRenderer})`
       : "Not available in this browser";
-  capabilitiesList.appendChild(capabilityRow("WebGPU", gpuMeta));
+  capabilitiesList.appendChild(capabilityRow("WebGPU", gpuMeta, { wide: true }));
   if (caps.webgpu.supported && caps.glRenderer) {
-    capabilitiesList.appendChild(capabilityRow("GPU (WebGL renderer)", caps.glRenderer));
+    capabilitiesList.appendChild(capabilityRow("GPU (WebGL renderer)", caps.glRenderer, { wide: true }));
   }
   capabilitiesList.appendChild(
     capabilityRow("CPU cores", caps.cpuCores ? String(caps.cpuCores) : "Not reported by this browser")
