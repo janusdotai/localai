@@ -173,8 +173,17 @@ let pendingLoadCached = false;
 let activeStop = null;
 let userStoppedGeneration = false;
 
+// Incremented once per generated chunk by whichever stream*() is currently
+// running (one WebLLM/Chrome AI stream chunk, one Transformers.js "token"
+// worker message) — a proxy for token count, not a real tokenizer count, but
+// close enough for a rough tok/s readout under each reply. Reset per
+// generation by beginGenerating() so a stale count from a prior reply can't
+// leak into the next one's stats.
+let streamChunkCount = 0;
+
 function beginGenerating() {
   userStoppedGeneration = false;
+  streamChunkCount = 0;
   sendBtn.classList.add("hidden");
   stopBtn.classList.remove("hidden");
 }
@@ -711,14 +720,32 @@ function addBubble(role) {
   avatar.className = `avatar ${role}`;
   avatar.textContent = role === "user" ? "U" : "A";
 
+  // .msg-col wraps the bubble so a .msg-stats line (tok/s, added after an
+  // assistant reply finishes — see setMsgStats()) can sit directly under it
+  // without disturbing the row's avatar+bubble flex layout.
+  const col = document.createElement("div");
+  col.className = "msg-col";
+
   const bubble = document.createElement("div");
   bubble.className = `msg ${role}`;
 
-  row.append(avatar, bubble);
+  col.appendChild(bubble);
+  row.append(avatar, col);
   chatInner.appendChild(row);
   updateEmptyState();
   chatEl.scrollTop = chatEl.scrollHeight;
   return bubble;
+}
+
+// Small "12.3 tok/s · 42 tokens · 3.4s" line under an assistant reply once
+// generation finishes. chunkCount is a proxy for real token count (see
+// streamChunkCount above) — approximate, not a tokenizer-verified number.
+function setMsgStats(bubble, chunkCount, elapsedSec) {
+  if (chunkCount <= 0 || elapsedSec <= 0) return;
+  const stats = document.createElement("div");
+  stats.className = "msg-stats";
+  stats.textContent = `${(chunkCount / elapsedSec).toFixed(1)} tok/s · ${chunkCount} tokens · ${elapsedSec.toFixed(1)}s`;
+  bubble.parentElement.appendChild(stats);
 }
 
 function addImageBubble(file) {
@@ -1555,6 +1582,7 @@ async function streamWebLLM(bubble) {
     });
     for await (const chunk of chunks) {
       const delta = chunk.choices[0]?.delta?.content ?? "";
+      if (delta) streamChunkCount++;
       full += delta;
       await renderAssistantMarkdown(bubble, full);
       chatEl.scrollTop = chatEl.scrollHeight;
@@ -1572,6 +1600,7 @@ async function streamWebLLM(bubble) {
 async function streamTransformers(bubble) {
   activeStop = hardStopWorkerGeneration;
   return workerGenerate(history, (fullText) => {
+    streamChunkCount++;
     renderAssistantMarkdown(bubble, fullText);
     chatEl.scrollTop = chatEl.scrollHeight;
   });
@@ -1594,6 +1623,7 @@ async function streamVqa(bubble) {
   return workerGenerate(
     buildVqaPayload(),
     (fullText) => {
+      streamChunkCount++;
       renderAssistantMarkdown(bubble, fullText);
       chatEl.scrollTop = chatEl.scrollHeight;
     },
@@ -1609,6 +1639,7 @@ async function streamChromeAI(bubble) {
   try {
     const stream = chromeSession.promptStreaming(lastUserMessage, { signal: controller.signal });
     for await (const chunk of stream) {
+      streamChunkCount++;
       // Some Chrome versions yield cumulative text, others yield deltas.
       if (chunk.startsWith(full)) {
         full = chunk;
@@ -1775,9 +1806,11 @@ form.addEventListener("submit", async (e) => {
   bubble.classList.add("pending");
 
   beginGenerating();
+  const startTime = performance.now();
   try {
     const reply = await streamers[providerSelect.value](bubble);
     targetHistory.push({ role: "assistant", content: reply });
+    setMsgStats(bubble, streamChunkCount, (performance.now() - startTime) / 1000);
   } catch (err) {
     console.error(err);
     bubble.textContent = `Error: ${err.message ?? err}`;

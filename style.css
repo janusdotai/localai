@@ -420,6 +420,16 @@ body {
   color: var(--fg);
 }
 
+.msg-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.msg-row.user .msg-col {
+  align-items: flex-end;
+}
+
 .msg {
   min-width: 0;
   padding: 0.55rem 0.85rem;
@@ -428,6 +438,13 @@ body {
   font-size: 0.92rem;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.msg-stats {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+  padding: 0 0.15rem;
 }
 
 .msg.user {
