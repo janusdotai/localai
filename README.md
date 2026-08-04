@@ -6,7 +6,7 @@ It's a single-page, no-build-step app (`index.html` + `app.js` + `style.css`) th
 
 # Demo
 
-https://local.janus.ai
+[https://local.janus.ai](https://local.janus.ai)
 
 ## Running it
 
