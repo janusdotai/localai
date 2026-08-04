@@ -388,6 +388,7 @@ async function renderSettingsList() {
         clearBtn.textContent = "Clearing…";
         await deleteCachedEntriesFor(row.value);
         await Promise.all([renderSettingsList(), renderStorageSummary()]);
+        markDownloadedModels(providerSelect.value);
       });
       el.appendChild(clearBtn);
     }
@@ -433,6 +434,7 @@ settingsClearAllBtn.addEventListener("click", async () => {
   settingsClearAllBtn.disabled = false;
   settingsClearAllBtn.textContent = "Clear all downloaded models";
   await Promise.all([renderSettingsList(), renderStorageSummary()]);
+  markDownloadedModels(providerSelect.value);
 });
 
 // Gathers everything the "Capabilities" panel shows in one pass, so both the
@@ -701,6 +703,27 @@ function populateModelOptions(provider) {
     modelSelect.appendChild(opt);
   }
   modelGroup.style.display = models.length ? "" : "none";
+  markDownloadedModels(provider);
+}
+
+// Subtle "already downloaded" indicator on the model dropdown, so switching
+// providers/models shows which options avoid a fresh multi-hundred-MB
+// download. Reuses the same Cache API scan the storage inspector already
+// does (findCachedEntriesFor) rather than tracking download state ourselves.
+// Runs after populateModelOptions rebuilds the <option> list, and again
+// after a load completes or a cache entry is cleared, since either can
+// change which models are actually cached.
+async function markDownloadedModels(provider) {
+  if (!window.caches) return;
+  const models = providerModels[provider];
+  const options = Array.from(modelSelect.options);
+  await Promise.all(
+    models.map(async ({ value, label }, i) => {
+      const entries = await findCachedEntriesFor(value);
+      const opt = options[i];
+      if (opt) opt.textContent = entries.length ? `${label} ✓` : label;
+    })
+  );
 }
 
 function getSelectedModelConfig() {
@@ -1425,6 +1448,7 @@ modalConfirmBtn.addEventListener("click", async () => {
     await loaders[providerSelect.value]();
     loadedModelKey = `${providerSelect.value}:${modelSelect.value}`;
     setChatEnabled(true);
+    markDownloadedModels(providerSelect.value);
     setTimeout(hideLoadModal, 500);
   } catch (err) {
     console.error(err);
