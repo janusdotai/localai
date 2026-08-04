@@ -838,7 +838,7 @@ body {
 }
 
 .modal-note {
-  margin: 0;
+  margin: 5;
   font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.4;
