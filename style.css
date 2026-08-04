@@ -11,6 +11,9 @@
   --bubble-assistant-fg: #1a1a1a;
   --sidebar-bg: #f7f7f8;
   --code-bg: rgba(0, 0, 0, 0.06);
+  --ok: #15803d;
+  --warn: #b45309;
+  --bad: #dc2626;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -26,6 +29,9 @@
     --bubble-assistant-fg: #e5e7eb;
     --sidebar-bg: #0b0d11;
     --code-bg: rgba(255, 255, 255, 0.08);
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
   }
 }
 
@@ -974,6 +980,34 @@ body {
   flex: 0 0 auto;
   padding: 0.4rem 0.9rem;
   font-size: 0.82rem;
+}
+
+/* Pass/fail (and in-between) coloring for capability rows — ok/warn/bad map
+   to green/amber/red so support status reads at a glance, without needing to
+   parse the ✓/✗ text. Only rows with real pass/fail meaning get a class;
+   purely informational rows (CPU cores, device memory) stay neutral. */
+.settings-row.status-ok {
+  border-color: var(--ok);
+}
+
+.settings-row.status-warn {
+  border-color: var(--warn);
+}
+
+.settings-row.status-bad {
+  border-color: var(--bad);
+}
+
+.settings-row.status-ok .settings-row-meta {
+  color: var(--ok);
+}
+
+.settings-row.status-warn .settings-row-meta {
+  color: var(--warn);
+}
+
+.settings-row.status-bad .settings-row-meta {
+  color: var(--bad);
 }
 
 /* The capabilities modal has two .settings-list blocks in one card (device

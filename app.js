@@ -162,6 +162,7 @@ let mediaRecorder = null;
 let micStream = null;
 let recordedChunks = [];
 let pendingLoadKind = "provider";
+let pendingLoadCached = false;
 
 // Provider-specific "stop generating" hook, set by each stream*() function
 // right before it starts and cleared once it finishes — there's only ever
@@ -213,22 +214,43 @@ function dismissModalIfCancelable() {
   if (isModalCancelable()) hideLoadModal();
 }
 
+// cached=false is always the first paint (no network round-trip before the
+// modal can open); showConfirmModal() below kicks off an async cache check
+// right after and re-calls this to correct the copy to "Load" in place if
+// the model turns out to already be downloaded.
+function applyConfirmModalCopy({ modelLabel, cached, isChrome, config }) {
+  pendingLoadCached = cached;
+  modalTitle.textContent = cached ? "Load model?" : "Download model?";
+  modalModelName.textContent = modelLabel;
+  modalSizeWarning.textContent = isChrome
+    ? "Chrome manages this download itself — size and progress aren't reported to this page."
+    : cached
+      ? "Already downloaded and cached in this browser — this will load it from cache, no network needed."
+      : `Estimated download size: ${config?.sizeEstimate ?? "unknown"} (approximate).`;
+  modalConfirmBtn.textContent = cached ? "Load" : "Download";
+}
+
 function showConfirmModal(kind = "provider") {
   pendingLoadKind = kind;
   const config = kind === "asr" ? getAsrModelConfig() : getSelectedModelConfig();
   const modelLabel =
     config?.label ?? providerSelect.options[providerSelect.selectedIndex].textContent;
+  const isChrome = kind !== "asr" && providerSelect.value === "chrome";
 
-  modalTitle.textContent = "Download model?";
-  modalModelName.textContent = modelLabel;
-  modalSizeWarning.textContent =
-    kind !== "asr" && providerSelect.value === "chrome"
-      ? "Chrome manages this download itself — size and progress aren't reported to this page."
-      : `Estimated download size: ${config?.sizeEstimate ?? "unknown"} (approximate).`;
+  applyConfirmModalCopy({ modelLabel, cached: false, isChrome, config });
 
   modalConfirmSection.classList.remove("hidden");
   modalProgressSection.classList.add("hidden");
   loadModal.classList.remove("hidden");
+
+  if (!isChrome && config && window.caches) {
+    findCachedEntriesFor(config.value).then((entries) => {
+      const stillRelevant = pendingLoadKind === kind && !loadModal.classList.contains("hidden");
+      if (entries.length && stillRelevant) {
+        applyConfirmModalCopy({ modelLabel, cached: true, isChrome, config });
+      }
+    });
+  }
 }
 
 function setLoadProgress(text, percent = null) {
@@ -507,9 +529,12 @@ function providerSupport(caps) {
   };
 }
 
-function capabilityRow(name, meta, { wide = false } = {}) {
+// status is "ok" | "warn" | "bad" | undefined (undefined = neutral, for
+// purely informational rows with no pass/fail meaning, e.g. CPU core count).
+function capabilityRow(name, meta, { wide = false, status } = {}) {
   const el = document.createElement("div");
   el.className = wide ? "settings-row settings-row--wide" : "settings-row";
+  if (status) el.classList.add(`status-${status}`);
   const info = document.createElement("div");
   const nameEl = document.createElement("div");
   nameEl.className = "settings-row-name";
@@ -536,7 +561,9 @@ async function renderCapabilities() {
     : caps.glRenderer
       ? `Not available (WebGL reports: ${caps.glRenderer})`
       : "Not available in this browser";
-  capabilitiesList.appendChild(capabilityRow("WebGPU", gpuMeta, { wide: true }));
+  capabilitiesList.appendChild(
+    capabilityRow("WebGPU", gpuMeta, { wide: true, status: caps.webgpu.supported ? "ok" : "bad" })
+  );
   if (caps.webgpu.supported && caps.glRenderer) {
     capabilitiesList.appendChild(capabilityRow("GPU (WebGL renderer)", caps.glRenderer, { wide: true }));
   }
@@ -549,26 +576,38 @@ async function renderCapabilities() {
       caps.deviceMemory ? `~${caps.deviceMemory} GB (approx, Chrome/Edge-only API)` : "Not reported by this browser"
     )
   );
-  capabilitiesList.appendChild(capabilityRow("WebAssembly", caps.wasm ? "Supported" : "Not supported"));
+  capabilitiesList.appendChild(
+    capabilityRow("WebAssembly", caps.wasm ? "Supported" : "Not supported", { status: caps.wasm ? "ok" : "bad" })
+  );
+  const geminiStatus = !caps.geminiNano.supported
+    ? "bad"
+    : caps.geminiNano.availability === "available"
+      ? "ok"
+      : caps.geminiNano.availability === "unavailable"
+        ? "bad"
+        : "warn"; // e.g. "downloadable" / "downloading" — usable soon, not yet
   capabilitiesList.appendChild(
     capabilityRow(
       "Gemini Nano (Chrome built-in AI)",
-      caps.geminiNano.supported ? `Availability: ${caps.geminiNano.availability}` : "Not supported in this browser"
+      caps.geminiNano.supported ? `Availability: ${caps.geminiNano.availability}` : "Not supported in this browser",
+      { status: geminiStatus }
     )
   );
+  const storageRatio = caps.storage?.quota ? caps.storage.usage / caps.storage.quota : null;
   capabilitiesList.appendChild(
     capabilityRow(
       "Storage quota",
       caps.storage?.quota
         ? `Using ${formatBytes(caps.storage.usage)} of roughly ${formatBytes(caps.storage.quota)} available`
-        : "Not reported by this browser"
+        : "Not reported by this browser",
+      { status: storageRatio !== null && storageRatio > 0.9 ? "warn" : undefined }
     )
   );
 
   const support = providerSupport(caps);
   for (const [provider, { ok, reason }] of Object.entries(support)) {
     capabilitiesProviders.appendChild(
-      capabilityRow(providerLabels[provider], `${ok ? "✓" : "✗"} ${reason}`)
+      capabilityRow(providerLabels[provider], `${ok ? "✓" : "✗"} ${reason}`, { status: ok ? "ok" : "bad" })
     );
   }
 }
@@ -1400,7 +1439,7 @@ loadBtn.addEventListener("click", () => showConfirmModal());
 composerHeroLoadBtn.addEventListener("click", () => showConfirmModal());
 
 modalConfirmBtn.addEventListener("click", async () => {
-  modalTitle.textContent = "Downloading model";
+  modalTitle.textContent = pendingLoadCached ? "Loading model" : "Downloading model";
   modalConfirmSection.classList.add("hidden");
   modalProgressSection.classList.remove("hidden");
   modalProgressFill.classList.add("indeterminate");
