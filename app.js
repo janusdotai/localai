@@ -691,6 +691,22 @@ function setChatEnabled(enabled) {
   const vqaReady = providerSelect.value !== "vqa" || vqaImage !== null;
   input.disabled = !enabled || !vqaReady;
   sendBtn.disabled = !enabled || !vqaReady;
+  // Mic fills the same text input, so it's confusing to let voice input
+  // work while typing/sending don't — gate it identically, even though the
+  // ASR model it actually uses is otherwise independent of the chat engine.
+  micBtn.disabled = !enabled || !vqaReady;
+  // A greyed-out icon button with no explanation is easy to mistake for
+  // broken rather than disabled-for-a-reason — spell out why via the same
+  // title/aria-label used for the default and recording states.
+  micBtn.title = !enabled
+    ? "Load a model first"
+    : !vqaReady
+      ? "Attach an image first"
+      : "Voice input";
+  micBtn.setAttribute(
+    "aria-label",
+    micBtn.disabled ? micBtn.title : isRecording ? "Stop recording" : "Start voice input"
+  );
   imageInput.disabled = !enabled;
   imageLabel.classList.toggle("disabled", !enabled);
   vqaImageInput.disabled = !enabled;
@@ -1688,11 +1704,11 @@ imageInput.addEventListener("change", async () => {
   }
 });
 
-// Voice input. The mic's own enabled state is intentionally NOT wired into
-// setChatEnabled() — transcribing speech into the text box doesn't require a
-// chat engine to be loaded at all, only the (independent) ASR model. It's
-// only briefly disabled for the duration of its own load/transcribe calls,
-// to prevent double-clicks.
+// Voice input. The mic technically only needs its own (independent) ASR
+// model, not a loaded chat engine — but its whole purpose is filling the
+// text input, so it's wired into setChatEnabled() to stay disabled whenever
+// that input is (see above). It's also briefly disabled for the duration of
+// its own load/transcribe calls, to prevent double-clicks.
 function setMicRecordingUI(recording) {
   micBtn.classList.toggle("recording", recording);
   micBtn.setAttribute("aria-label", recording ? "Stop recording" : "Start voice input");
