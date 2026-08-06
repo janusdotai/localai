@@ -1,6 +1,6 @@
 # localai
 
-A simple local-frist chat interface that runs **entirely in the browser**: no server, no API key, no data leaving your machine.
+A lightweight local-frist chat interface that runs **entirely in the browser**: no server, no API key, no data leaving your machine.
 
 It's a single-page, no-build-step app (`index.html` + `app.js` + `style.css`) that switches between several client-side inference options — [WebLLM](https://github.com/mlc-ai/web-llm), [Transformers.js](https://github.com/huggingface/transformers.js), and Chrome's built-in Gemini Nano — with a familiar ChatGPT/OpenWebUI-style UI, persisted chat history in localstorage.
 
@@ -19,7 +19,7 @@ python3 -m http.server 8000
 # or: npx serve .
 ```
 
-Then open `http://localhost:8000` in a recent Chrome or Edge, pick a provider from the dropdown, click "Load model", and start chatting (or upload an image, for the captioning/image-Q&A providers).
+Then open `http://localhost:8000` pick a provider from the dropdown, click "Load model", and start chatting (or upload an image, for the captioning/image-Q&A providers).
 
 ## External dependencies
 
