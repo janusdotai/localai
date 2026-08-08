@@ -54,14 +54,22 @@ const providerModels = {
   // config home (reused by allCacheableModels() for the storage inspector,
   // same as every other entry above) and isn't ever assigned to modelSelect.
   asr: [
-    // Same broken-default-quantized-graph issue as the vit-gpt2 captioning
-    // model above ("Missing required scale" DequantizeLinear error) —
-    // dtype: "fp32" sidesteps it. Confirmed via direct testing: the default
-    // dtype throws on session creation, fp32 loads (~5-7s) and transcribes
-    // correctly. sizeEstimate is the real onnx/ file sizes from HF (encoder
-    // 32.9MB + decoder 118.4MB), not a guess — quantized would be ~41MB but
-    // is unusable.
-    { value: "Xenova/whisper-tiny.en", label: "Whisper Tiny English (speech-to-text)", dtype: "fp32", sizeEstimate: "~150 MB" },
+    // Upgraded from Xenova/whisper-tiny.en for a real accuracy jump. Unlike
+    // whisper-tiny.en (which needed dtype: "fp32" because its quantized graph
+    // was broken) and unlike the vit-gpt2 captioning model's identical class
+    // of bug, this model's quantized ("q8") graph loads and transcribes
+    // correctly — confirmed via direct testing (Node + @huggingface/
+    // transformers, bypassing only the browser-specific AudioContext step):
+    // dtype "q8"/"int8" both load in ~1-3s from cache and reproduce the
+    // reference JFK sample transcript exactly; dtype "fp16" throws a real
+    // ONNX Runtime graph-initialization error (GetIndexFromName ... itr !=
+    // node_args.end(), a different signature but the same class of bug as
+    // the DequantizeLinear failures elsewhere in this app) so it's avoided.
+    // sizeEstimate is the real onnx/ file sizes for dtype "q8" (encoder
+    // 23.2MB quantized + decoder 53.7MB quantized) — smaller than
+    // whisper-tiny.en's forced fp32 despite being a bigger, more accurate
+    // model.
+    { value: "onnx-community/whisper-base.en", label: "Whisper Base English (speech-to-text)", dtype: "q8", sizeEstimate: "~77 MB" },
   ],
 };
 
