@@ -54,23 +54,25 @@ const providerModels = {
   // config home (reused by allCacheableModels() for the storage inspector,
   // same as every other entry above) and isn't ever assigned to modelSelect.
   asr: [
-    // Upgraded from Xenova/whisper-tiny.en for a real accuracy jump. Same
-    // broken-quantized-graph bug class as whisper-tiny.en and the vit-gpt2
-    // captioning model, but with an extra wrinkle found only via real
-    // browser usage: dtype "q8"/"int8" both load and transcribe correctly
-    // under Node's CPU execution provider (verified there against the
-    // reference JFK sample), but throw in the browser specifically —
-    // `qdq_actions.cc:137 TransposeDQWeightsForMatMulNBits Missing required
-    // scale ... embed_tokens.weight_transposed_DequantizeLinear` — because
-    // this app's ASR path has no explicit device forcing, so Transformers.js
-    // auto-selects WebGPU when available, and WebGPU's MatMulNBits graph
-    // fusion is what's actually broken for this quantized embed_tokens
-    // layer (Node has no WebGPU, so CPU-only testing never caught it).
-    // dtype: "fp32" sidesteps it, same fix as whisper-tiny.en. dtype "fp16"
-    // also throws (a different real ONNX graph-initialization error) so
-    // it's avoided too. sizeEstimate is the real onnx/ file sizes for fp32
-    // (encoder 82.5MB + decoder 208.5MB).
-    { value: "onnx-community/whisper-base.en", label: "Whisper Base English (speech-to-text)", dtype: "fp32", sizeEstimate: "~290 MB" },
+    // Tried onnx-community/whisper-base.en for a real accuracy jump (see
+    // CLAUDE.md's "Voice input" section for the full story, including a
+    // WebGPU-specific broken-quantized-graph bug found along the way).
+    // Reverted after real usage: at the dtype that actually works in-browser
+    // (fp32, ~290MB — its quantized graph breaks under WebGPU, same class of
+    // bug as below), the bigger model was noticeably slower per-inference
+    // than whisper-tiny.en, which stings twice as much here since
+    // runPartialTranscribe() re-runs the full clip every 1.5s. Reported
+    // directly by the user, not a hypothetical — reverted to tiny.en for
+    // responsiveness over accuracy.
+    //
+    // Same broken-default-quantized-graph issue as the vit-gpt2 captioning
+    // model above ("Missing required scale" DequantizeLinear error) —
+    // dtype: "fp32" sidesteps it. Confirmed via direct testing: the default
+    // dtype throws on session creation, fp32 loads (~5-7s) and transcribes
+    // correctly. sizeEstimate is the real onnx/ file sizes from HF (encoder
+    // 32.9MB + decoder 118.4MB), not a guess — quantized would be ~41MB but
+    // is unusable.
+    { value: "Xenova/whisper-tiny.en", label: "Whisper Tiny English (speech-to-text)", dtype: "fp32", sizeEstimate: "~150 MB" },
   ],
 };
 
