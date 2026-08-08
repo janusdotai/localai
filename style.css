@@ -729,6 +729,14 @@ body {
   display: none;
 }
 
+/* Applied while voice input is recording, so the live/partial transcript
+   reads as "still being figured out" rather than final, confirmed text —
+   removed again once the authoritative transcript lands on stop. */
+#chat-input.interim-transcript {
+  font-style: italic;
+  opacity: 0.7;
+}
+
 #send-btn:disabled,
 #chat-input:disabled {
   opacity: 0.5;

@@ -164,6 +164,20 @@ let recordedChunks = [];
 let pendingLoadKind = "provider";
 let pendingLoadCached = false;
 
+// "Streaming" voice input: Whisper itself isn't a streaming model, so this
+// fakes the natural feel by re-transcribing the growing recording every
+// PARTIAL_TRANSCRIBE_INTERVAL_MS and pushing the latest guess into the input
+// as the user talks, instead of only filling it once at the end. Each pass
+// re-runs on the whole clip so far (there's no cheaper incremental Whisper
+// API), so it costs more compute the longer someone talks — fine for the
+// short, few-sentence utterances this is meant for. isTranscribingPartial
+// skips a tick if the previous pass hasn't finished rather than queuing one,
+// so a slow (e.g. WASM-only) device just gets less frequent updates rather
+// than a growing backlog.
+const PARTIAL_TRANSCRIBE_INTERVAL_MS = 1500;
+let partialTranscribeTimer = null;
+let isTranscribingPartial = false;
+
 // Provider-specific "stop generating" hook, set by each stream*() function
 // right before it starts and cleared once it finishes — there's only ever
 // one generation in flight at a time. userStoppedGeneration distinguishes a
@@ -1369,6 +1383,25 @@ function asrWorkerTranscribe(audioData) {
   });
 }
 
+// asrWorkerTranscribe() attaches a fresh "message" listener per call to the
+// one shared asrWorker — fine when only a single call is ever in flight, but
+// the live partial-transcribe loop (runPartialTranscribe(), below) and the
+// final pass on stop (handleRecordingStopped()) can now legitimately overlap
+// (a partial tick still resolving when the user releases the mic). Two
+// listeners on the same worker would both race to consume whichever
+// "transcript" message arrives first, resolving the wrong caller's promise.
+// Routing every transcribe call through this queue guarantees only one is
+// ever in flight, so each caller's listener sees exactly its own reply.
+let asrTranscribeQueue = Promise.resolve();
+function queuedAsrTranscribe(audioData) {
+  const run = asrTranscribeQueue.then(() => asrWorkerTranscribe(audioData));
+  asrTranscribeQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 function asrProgressCallback(progress) {
   if (progress.status === "progress") {
     const pct = Math.round(progress.progress ?? 0);
@@ -1736,22 +1769,52 @@ async function startRecording() {
     if (e.data.size > 0) recordedChunks.push(e.data);
   };
   mediaRecorder.onstop = handleRecordingStopped;
-  mediaRecorder.start();
+  // A timeslice makes dataavailable fire every 250ms instead of only once at
+  // stop() — recordedChunks then already has audio to work with as soon as
+  // the first partial-transcribe tick below fires.
+  mediaRecorder.start(250);
   isRecording = true;
   setMicRecordingUI(true);
   setStatus("Listening…");
+  input.classList.add("interim-transcript");
+  partialTranscribeTimer = setInterval(runPartialTranscribe, PARTIAL_TRANSCRIBE_INTERVAL_MS);
 }
 
 function stopRecording() {
+  clearInterval(partialTranscribeTimer);
+  partialTranscribeTimer = null;
   mediaRecorder?.stop(); // triggers onstop -> handleRecordingStopped
   micStream?.getTracks().forEach((t) => t.stop()); // release the mic/tab indicator
   isRecording = false;
   setMicRecordingUI(false);
 }
 
+// Runs on a timer while recording, re-transcribing everything captured so
+// far and updating the input live so text fills in as the user talks rather
+// than only appearing once they stop. Best-effort: errors here are logged
+// and swallowed rather than surfaced, since the authoritative transcript is
+// the final pass in handleRecordingStopped() once recording actually ends.
+async function runPartialTranscribe() {
+  if (isTranscribingPartial || recordedChunks.length === 0) return;
+  isTranscribingPartial = true;
+  try {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+    if (blob.size > 0) {
+      const audioData = await decodeAudioBlob(blob);
+      const text = await queuedAsrTranscribe(audioData);
+      if (isRecording) input.value = text.trim();
+    }
+  } catch (err) {
+    console.warn("Partial transcription failed:", err);
+  } finally {
+    isTranscribingPartial = false;
+  }
+}
+
 async function handleRecordingStopped() {
   const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
   recordedChunks = [];
+  input.classList.remove("interim-transcript");
   if (blob.size === 0) {
     setStatus("No audio captured — try again.", true);
     return;
@@ -1760,7 +1823,7 @@ async function handleRecordingStopped() {
   micBtn.disabled = true;
   try {
     const audioData = await decodeAudioBlob(blob);
-    const text = await asrWorkerTranscribe(audioData);
+    const text = await queuedAsrTranscribe(audioData);
     // Fills the input for the user to review/edit and send themselves —
     // never auto-submitted (no form.requestSubmit()/.submit() call here).
     input.value = text.trim();
