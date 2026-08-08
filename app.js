@@ -54,22 +54,23 @@ const providerModels = {
   // config home (reused by allCacheableModels() for the storage inspector,
   // same as every other entry above) and isn't ever assigned to modelSelect.
   asr: [
-    // Upgraded from Xenova/whisper-tiny.en for a real accuracy jump. Unlike
-    // whisper-tiny.en (which needed dtype: "fp32" because its quantized graph
-    // was broken) and unlike the vit-gpt2 captioning model's identical class
-    // of bug, this model's quantized ("q8") graph loads and transcribes
-    // correctly — confirmed via direct testing (Node + @huggingface/
-    // transformers, bypassing only the browser-specific AudioContext step):
-    // dtype "q8"/"int8" both load in ~1-3s from cache and reproduce the
-    // reference JFK sample transcript exactly; dtype "fp16" throws a real
-    // ONNX Runtime graph-initialization error (GetIndexFromName ... itr !=
-    // node_args.end(), a different signature but the same class of bug as
-    // the DequantizeLinear failures elsewhere in this app) so it's avoided.
-    // sizeEstimate is the real onnx/ file sizes for dtype "q8" (encoder
-    // 23.2MB quantized + decoder 53.7MB quantized) — smaller than
-    // whisper-tiny.en's forced fp32 despite being a bigger, more accurate
-    // model.
-    { value: "onnx-community/whisper-base.en", label: "Whisper Base English (speech-to-text)", dtype: "q8", sizeEstimate: "~77 MB" },
+    // Upgraded from Xenova/whisper-tiny.en for a real accuracy jump. Same
+    // broken-quantized-graph bug class as whisper-tiny.en and the vit-gpt2
+    // captioning model, but with an extra wrinkle found only via real
+    // browser usage: dtype "q8"/"int8" both load and transcribe correctly
+    // under Node's CPU execution provider (verified there against the
+    // reference JFK sample), but throw in the browser specifically —
+    // `qdq_actions.cc:137 TransposeDQWeightsForMatMulNBits Missing required
+    // scale ... embed_tokens.weight_transposed_DequantizeLinear` — because
+    // this app's ASR path has no explicit device forcing, so Transformers.js
+    // auto-selects WebGPU when available, and WebGPU's MatMulNBits graph
+    // fusion is what's actually broken for this quantized embed_tokens
+    // layer (Node has no WebGPU, so CPU-only testing never caught it).
+    // dtype: "fp32" sidesteps it, same fix as whisper-tiny.en. dtype "fp16"
+    // also throws (a different real ONNX graph-initialization error) so
+    // it's avoided too. sizeEstimate is the real onnx/ file sizes for fp32
+    // (encoder 82.5MB + decoder 208.5MB).
+    { value: "onnx-community/whisper-base.en", label: "Whisper Base English (speech-to-text)", dtype: "fp32", sizeEstimate: "~290 MB" },
   ],
 };
 
