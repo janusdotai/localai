@@ -164,6 +164,8 @@ Whisper isn't a streaming ASR model, so live-updating text is faked rather than 
 
 Chose this (re-transcribe-the-growing-buffer) approach over the browser's native `SpeechRecognition` API, which gives true real-time word-by-word streaming with far less code — but in Chrome that API sends audio to Google's speech servers, which would break this whole app's "nothing leaves the machine" premise for the one feature where that'd be least obvious to a user.
 
+**Submitting the chat form while still recording** ends the recording as part of sending, using whatever interim transcript is already on screen at that instant, instead of requiring a separate stop-then-review-then-send sequence — so "talk, hit submit, talk again" is one fluid loop. `suppressNextTranscriptFill` marks that case so the slower, more-accurate final transcription (which lands a moment later, since `mediaRecorder.stop()` → `onstop` → decode → transcribe is all async) gets discarded instead of overwriting the input box right after it was cleared for the next turn — found via real usage: without this, clicking Send mid-recording briefly appeared to work, then the just-cleared input silently refilled with the old message a second or so later.
+
 ## Running it
 
 WebGPU and ES module imports require the page to be served over `http(s)://`, not opened directly as a `file://` URL. From this directory:

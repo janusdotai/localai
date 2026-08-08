@@ -177,6 +177,14 @@ let pendingLoadCached = false;
 const PARTIAL_TRANSCRIBE_INTERVAL_MS = 1500;
 let partialTranscribeTimer = null;
 let isTranscribingPartial = false;
+// Set right before stopRecording() is called as a side effect of submitting
+// the chat form (see form's submit handler) rather than via a direct mic
+// click. In that case the message already went out using whatever interim
+// text was on screen at submit time, so the slower, more-accurate final
+// transcription that lands a moment later (handleRecordingStopped) must be
+// discarded instead of overwriting the input — otherwise the box would
+// re-fill with stale text right after being cleared for the next turn.
+let suppressNextTranscriptFill = false;
 
 // Provider-specific "stop generating" hook, set by each stream*() function
 // right before it starts and cleared once it finishes — there's only ever
@@ -1787,6 +1795,10 @@ function stopRecording() {
   micStream?.getTracks().forEach((t) => t.stop()); // release the mic/tab indicator
   isRecording = false;
   setMicRecordingUI(false);
+  // Removed here (not just in handleRecordingStopped, which runs a moment
+  // later once onstop fires) so there's no visible flash of italic/dimmed
+  // style on whatever the input shows immediately after stopping.
+  input.classList.remove("interim-transcript");
 }
 
 // Runs on a timer while recording, re-transcribing everything captured so
@@ -1814,7 +1826,11 @@ async function runPartialTranscribe() {
 async function handleRecordingStopped() {
   const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
   recordedChunks = [];
-  input.classList.remove("interim-transcript");
+  if (suppressNextTranscriptFill) {
+    suppressNextTranscriptFill = false;
+    setStatus("");
+    return;
+  }
   if (blob.size === 0) {
     setStatus("No audio captured — try again.", true);
     return;
@@ -1870,6 +1886,17 @@ vqaImageInput.addEventListener("change", () => {
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  // Submitting while voice input is still recording ends the recording as
+  // part of sending, using whatever interim transcript is already on screen
+  // — so "talk, click submit" is one motion instead of "talk, stop
+  // recording, review, then submit". The slower final transcription that
+  // would otherwise land a moment later is discarded (see
+  // suppressNextTranscriptFill) so it can't re-fill the box after it's
+  // cleared below.
+  if (isRecording) {
+    suppressNextTranscriptFill = true;
+    stopRecording();
+  }
   const text = input.value.trim();
   if (!text) return;
   const isVqa = providerSelect.value === "vqa";
