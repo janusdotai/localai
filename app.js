@@ -5,6 +5,12 @@
 //   - "vqa": multi-turn "chat about an image" via WASM/WebGPU (@huggingface/transformers)
 //   - "chrome": Chrome's built-in Gemini Nano (window.LanguageModel Prompt API)
 
+// Hard ceiling on a single reply's length, shared by every provider, so a
+// model that never emits a natural stop (see runaway-generation incident)
+// can't hang generation indefinitely. Mirrored in transformers-worker.js's
+// max_new_tokens values.
+const MAX_OUTPUT_TOKENS = 2048;
+
 // sizeEstimate is a rough, approximate download size shown in the confirm
 // dialog before committing to a download — not measured at runtime.
 const providerModels = {
@@ -1082,6 +1088,11 @@ updateTopbarTitle();
 renderSidebarChats();
 updateEmptyState();
 
+if (!localStorage.getItem("aboutSeen")) {
+  openAboutModal();
+  localStorage.setItem("aboutSeen", "true");
+}
+
 function isMobileViewport() {
   return window.matchMedia("(max-width: 768px)").matches;
 }
@@ -1187,7 +1198,7 @@ let transformersWorker = null;
 // stop the browser reusing a stale copy indefinitely. Bump this by hand
 // whenever transformers-worker.js changes so the URL actually changes and
 // forces a real re-fetch.
-const WORKER_VERSION = "3";
+const WORKER_VERSION = "4";
 
 function getTransformersWorker() {
   if (!transformersWorker) {
@@ -1647,6 +1658,7 @@ async function streamWebLLM(bubble) {
     const chunks = await webllmEngine.chat.completions.create({
       messages: history,
       stream: true,
+      max_tokens: MAX_OUTPUT_TOKENS,
     });
     for await (const chunk of chunks) {
       const delta = chunk.choices[0]?.delta?.content ?? "";
@@ -1654,6 +1666,8 @@ async function streamWebLLM(bubble) {
       full += delta;
       await renderAssistantMarkdown(bubble, full);
       chatEl.scrollTop = chatEl.scrollHeight;
+      // Belt-and-suspenders in case a given model/build doesn't honor max_tokens.
+      if (streamChunkCount >= MAX_OUTPUT_TOKENS) break;
     }
   } catch (err) {
     // interruptGenerate() can surface as a rejection depending on exactly
@@ -1716,6 +1730,11 @@ async function streamChromeAI(bubble) {
       }
       await renderAssistantMarkdown(bubble, full);
       chatEl.scrollTop = chatEl.scrollHeight;
+      // Prompt API has no max-output option, so enforce the cap client-side.
+      if (streamChunkCount >= MAX_OUTPUT_TOKENS) {
+        controller.abort();
+        break;
+      }
     }
   } catch (err) {
     // AbortError from the signal firing — the for-await loop throws it

@@ -63,7 +63,7 @@ self.onmessage = async (e) => {
         },
       });
       await pipelineInstance(msg.history, {
-        max_new_tokens: 512,
+        max_new_tokens: 2048,
         do_sample: false,
         streamer,
       });
@@ -119,7 +119,7 @@ self.onmessage = async (e) => {
       await vqaModel.generate({
         ...inputs,
         do_sample: false,
-        max_new_tokens: 512,
+        max_new_tokens: 2048,
         streamer,
       });
       self.postMessage({ type: "done" });
