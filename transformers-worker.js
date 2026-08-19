@@ -32,7 +32,14 @@ self.onmessage = async (e) => {
   try {
     if (msg.type === "load") {
       const { pipeline } = await import("https://esm.run/@huggingface/transformers");
+      // device defaults to "auto" (not left unset): the library's own
+      // default for an unspecified device is a hard 'wasm' (CPU) in the
+      // browser, not GPU auto-detection — confirmed against the actual
+      // @huggingface/transformers source (selectDevice() falls back to
+      // DEFAULT_DEVICE = 'wasm' when deviceConfig is falsy). Only "auto"
+      // triggers real WebGPU-if-available detection.
       pipelineInstance = await pipeline(msg.task, msg.modelId, {
+        device: msg.device || "auto",
         ...(msg.dtype ? { dtype: msg.dtype } : {}),
         progress_callback: (progress) => {
           self.postMessage({ type: "progress", progress });

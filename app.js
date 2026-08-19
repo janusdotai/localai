@@ -31,12 +31,30 @@ const providerModels = {
   ],
   transformers: [
     { value: "onnx-community/Qwen2.5-0.5B-Instruct", label: "Qwen 2.5 0.5B Instruct (ONNX, q4)", dtype: "q4", sizeEstimate: "~300 MB" },
-    { value: "HuggingFaceTB/SmolLM2-135M-Instruct", label: "SmolLM2 135M Instruct (ONNX, very small/fast)", sizeEstimate: "~130 MB" },
+    // dtype pinned explicitly to q8: now that the worker requests
+    // device: "auto" (real WebGPU-if-available detection, see
+    // transformers-worker.js), an unspecified dtype would resolve to the
+    // per-device default — fp32 on webgpu vs. q8 on wasm — silently
+    // changing this model's download size depending on the user's
+    // hardware. Pinning it keeps this "very small/fast" entry small and
+    // fast regardless of device.
+    { value: "HuggingFaceTB/SmolLM2-135M-Instruct", label: "SmolLM2 135M Instruct (ONNX, very small/fast)", dtype: "q8", sizeEstimate: "~130 MB" },
     // Confirmed end-to-end (load + real generation) via headless Chromium's
     // WASM path. sizeEstimate is the real onnx/model_q4.onnx_data size from
     // HF, not a guess (a candidate estimate of ~230MB floating around
     // elsewhere was wrong — the real q4 weights are ~388MB).
     { value: "HuggingFaceTB/SmolLM2-360M-Instruct", label: "SmolLM2 360M Instruct (ONNX, q4)", dtype: "q4", sizeEstimate: "~390 MB" },
+    // Liquid AI's LFM2.5, released 2026-08. The q4/q4f16/q8 exports all hit
+    // the same broken-quantized-graph class of bug as vit-gpt2/whisper-tiny.en:
+    // ORT Web's CPU EP has no kernel for GatherBlockQuantized, so session
+    // creation throws "Could not find an implementation for
+    // GatherBlockQuantized ... /model/embed_tokens/Gather_Quant" for all
+    // three (confirmed directly in headless Chrome, not just Node — Node's
+    // CPU backend loads q4 fine, same Node-succeeds/browser-fails gap noted
+    // for whisper-base.en). fp32 and fp16 both create working sessions;
+    // fp16 is used here since it's the smaller of the two. sizeEstimate is
+    // the real onnx/model_fp16.onnx_data size from HF (~725MB).
+    { value: "onnx-community/LFM2.5-350M-ONNX", label: "LFM2.5 350M Instruct (ONNX, fp16)", dtype: "fp16", sizeEstimate: "~725 MB" },
   ],
   caption: [
     // The default quantized export of this model has a broken decoder graph
@@ -1198,7 +1216,7 @@ let transformersWorker = null;
 // stop the browser reusing a stale copy indefinitely. Bump this by hand
 // whenever transformers-worker.js changes so the URL actually changes and
 // forces a real re-fetch.
-const WORKER_VERSION = "4";
+const WORKER_VERSION = "5";
 
 function getTransformersWorker() {
   if (!transformersWorker) {
